@@ -1,0 +1,105 @@
+// This is an empty scss file for your custom styles - Please add your super duper awesome mega design styles here
+
+/* =======================================================
+	Navbar + Dropdowns, further adjustments.
+	ASU Global Standards uses bootstrap 3 nav walker + a whole different set of css to style the menus.
+	Adjusting for Bootstrap 4 + flexbox approach.
+	Additional colors defined in _theme_variables.scss.
+======================================================= */
+
+// More Nav Colors
+$black: 		#000000;
+$nav-back:		#353535;
+$nav-color:		#ededed;
+
+.navbar.bg-dark {
+	font-size: 16px;
+	font-weight:700;
+	font-family:  Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+	background-color: $nav-back;
+	color: $nav-color;
+}
+
+.navbar-dark .navbar-nav .nav-link:focus,
+.navbar-dark .navbar-nav .nav-link:hover {
+    background-color: $black;
+}
+
+.navbar .navbar-nav {
+	.menu-item a {
+		font-size: 16px;
+		font-family:  Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+		border-bottom:0px;
+		font-weight:700;
+	}
+
+	.dropdown-menu {
+		margin: 0;
+		border-radius: 0;
+	}
+}
+
+// Padding adjustment via media query. Spec calls for 15px. Theme is in REM's.
+@media (min-width: 768px) {
+	.navbar-expand-md .navbar-nav .nav-link {
+		padding-right: .95rem;
+		padding-left: .95rem;
+	}
+}
+
+/* =======================================================
+	Super Footer. 
+	Adjusting for brand and social media widgets in footer-branded widget area. 
+======================================================= */
+
+#footer-branded-area {
+	
+	// Fixes, styles for the ASU Endorsed Footer Widget.
+	.asu-engineering-footer-widget {
+
+		#fse-endorsed-logo {
+			margin-top:30px;
+			padding-bottom:15px;
+
+			a {
+				border-bottom:none;
+			}
+
+			.white-logo {
+			    /* Endorsed logo transform on hover */
+			    transition-duration: .5s;
+			    transform: scale3d(1, 1, 1);
+			    transform-origin: top left;
+			    padding-bottom: 10px;
+			}
+
+			.white-logo:hover {
+			    transform: scale3d(1.05, 1.05, 1.05);
+			    cursor: pointer;
+			}
+		}
+
+		.contact-link {
+		    // ASU Bootstrap Brand Standards identifies the contact link as the <a> element, not the <p>.
+		    // Remove the formatting from the paragraph wrapper
+		    border-bottom-width: 0;
+		}
+
+		.phone-link i { margin-right:10px; }
+
+		// Adds a 30px margin under the contribute link within this widget.
+		.contribute {
+			margin-top:30px;
+		}
+	}
+
+	// ASU Social Media Icons Footer Widget
+	.asu-socialicons-footer-widget {
+
+		.social-media {
+			// Adds a small top margin to blend in with widget above.
+			margin-top:25px;
+		}
+	}
+}
+

@@ -1,0 +1,57 @@
+// Use this file to overwrite the basic Bootstrap variables and add your own variables
+// To overwrite a Bootstrap variable you don´t have to touch the Bootstrap folder. 
+// Just copy a variable from /sass/bootstrap/_variables.scss, paste it here and edit the value.
+// As example you find one of the most important Bootstrap variable below: $brand-primary.
+// Thats the ugly Bootstrap blue used for all the links, primary buttons etc.
+// Just add your color code here, compile the theme.scss file to change this color everywhere
+
+$font-family-sans-serif:'Roboto', sans-serif;
+$brand-primary:         #7852B2; //#ff6d5a
+
+// Dropdown menu container and contents.
+// ****************************************
+
+$dropdown-bg:                    #1f1f1f;
+$dropdown-border-color:          #1f1f1f;
+$dropdown-border-width:          1px;
+$dropdown-divider-bg:            #AEAEAE;
+
+$dropdown-link-color:            #ededed;
+$dropdown-link-hover-color:      #ededed;
+$dropdown-link-hover-bg:         #000000;
+
+$dropdown-link-active-color:     #ffB130;
+$dropdown-link-active-bg:        #1f1f1f;
+
+/* Other defaults:
+	$dropdown-min-width:             10rem !default;
+	$dropdown-padding-y:             .5rem !default;
+	$dropdown-border-color:          rgba($black,.15) !default;
+	$dropdown-border-width:          $border-width !default;
+	$dropdown-spacer:                .125rem !default;
+	$dropdown-link-disabled-color:   $gray-600 !default;
+	$dropdown-box-shadow:            0 .5rem 1rem rgba($black,.175) !default;
+	$dropdown-item-padding-y:        .25rem !default; 
+	$dropdown-item-padding-x:        1.5rem !default;
+	$dropdown-header-color:          $gray-600 !default;
+*/
+
+
+// Navbar Variable Settings
+// ****************************************
+
+//$navbar-padding-y:                  ($spacer / 2) !default;
+//$navbar-padding-x:                  $spacer !default;
+
+//$navbar-toggler-padding-y:           .25rem !default;
+//$navbar-toggler-padding-x:           .75rem !default;
+//$navbar-toggler-font-size:           $font-size-lg !default;
+//$navbar-toggler-border-radius:       $btn-border-radius !default;
+
+$navbar-dark-color:                 #ededed;
+$navbar-dark-hover-color:           #ffb130;
+$navbar-dark-active-color:          #ffb130;
+// $navbar-dark-disabled-color:        rgba($white,.25) !default;
+$navbar-dark-toggler-icon-bg: none;
+// $navbar-dark-toggler-border-color:  rgba($white,.1) !default;
+
