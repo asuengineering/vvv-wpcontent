@@ -202,7 +202,7 @@ class ET_Builder_Element {
 		self::$current_module_index++;
 
 		if ( ! self::$_deprecations ) {
-			self::$_deprecations = require ET_BUILDER_DIR . 'deprecations.php';
+			self::$_deprecations = require_once ET_BUILDER_DIR . 'deprecations.php';
 			self::$_deprecations = self::$_deprecations['classes']['\ET_Builder_Module_Blurb'];
 		}
 
@@ -254,11 +254,23 @@ class ET_Builder_Element {
 		$this->_is_official_module = self::_is_official_module( get_class( $this ) );
 
 		$this->make_options_filterable();
-		$this->set_fields();
+
+		if ( et_fb_is_builder_ajax() ) {
+			// Ensure `et_fb_is_enabled` returns true while setting fields to avoid
+			// 3rd party modules using the function to generate different
+			// definitions when they are updated via the AJAX call.
+			add_filter( 'et_fb_is_enabled', '__return_true' );
+			$this->set_fields();
+			remove_filter( 'et_fb_is_enabled', '__return_true' );
+		} else {
+			$this->set_fields();
+		}
+
 		$this->set_factory_objects();
 
 		$this->_additional_fields_options = array();
 		$this->_add_additional_fields();
+
 		$this->_add_custom_css_fields();
 
 		$this->_maybe_add_global_defaults();
@@ -638,7 +650,7 @@ class ET_Builder_Element {
 
 		$is_preview       = is_preview() || is_et_pb_preview();
 		$forced_in_footer = $post_id && et_builder_setting_is_on( 'et_pb_css_in_footer', $post_id );
-		$forced_inline    = ! $post_id || $is_preview || $forced_in_footer || et_builder_setting_is_off( 'et_pb_static_css_file', $post_id );
+		$forced_inline    = ! $post_id || $is_preview || $forced_in_footer || et_builder_setting_is_off( 'et_pb_static_css_file', $post_id ) || et_core_is_safe_mode_active();
 		$unified_styles   = ! $forced_inline && ! $forced_in_footer;
 
 		$resource_owner = $unified_styles ? 'core' : 'builder';
@@ -1093,11 +1105,12 @@ class ET_Builder_Element {
 	 * Double quote are saved as "%22" in shortcode attributes.
 	 * Decode them back into "
 	 *
-	 * @param array $enabled_dynamic_attributes
+	 * @param array<string> $enabled_dynamic_attributes
+	 * @param bool $et_fb_processing_shortcode_object
 	 *
 	 * @return void
 	 */
-	private function _decode_double_quotes( $enabled_dynamic_attributes ) {
+	private function _decode_double_quotes( $enabled_dynamic_attributes, $et_fb_processing_shortcode_object ) {
 		if ( ! isset( $this->props ) ) {
 			return;
 		}
@@ -1109,6 +1122,12 @@ class ET_Builder_Element {
 		$font_icon_options = array( 'font_icon', 'button_icon', 'button_one_icon', 'button_two_icon', 'hover_icon' );
 
 		foreach ( $this->props as $attribute_key => $attribute_value ) {
+			if ( $et_fb_processing_shortcode_object && in_array( $attribute_key, $enabled_dynamic_attributes, true ) ) {
+				// Do not decode dynamic content values when preparing them for VB.
+				$shortcode_attributes[ $attribute_key ] = $attribute_value;
+				continue;
+			}
+
 			// decode HTML entities and remove trailing and leading quote if needed
 			$processed_attr_value = $need_html_entities_decode ? trim( htmlspecialchars_decode( $attribute_value, ENT_QUOTES ), '"' ) : $attribute_value;
 
@@ -1125,11 +1144,9 @@ class ET_Builder_Element {
 				$processed_attr_value = '';
 			}
 
+
 			// URLs are weird since they can allow non-ascii characters so we escape those separately.
-			// Also make sure the attribute is not powered by dynamic content so we do not escape
-			// the JSON value as if it is a raw url.
-			$is_dynamic_content_attribute = $this->_is_dynamic_value( $attribute_key, $attribute_value, $enabled_dynamic_attributes );
-			if ( ! $is_dynamic_content_attribute && in_array( $attribute_key, array( 'url', 'button_link', 'button_url' ), true ) ) {
+			if ( in_array( $attribute_key, array( 'url', 'button_link', 'button_url' ), true ) ) {
 				$shortcode_attributes[ $attribute_key ] = esc_url_raw( $processed_attr_value );
 			} else {
 				$shortcode_attributes[ $attribute_key ] = str_replace( array( '%22', '%92', '%91', '%93' ), array( '"', '\\', '&#91;', '&#93;' ), $processed_attr_value );
@@ -1514,9 +1531,9 @@ class ET_Builder_Element {
 	 *
 	 * @since 3.17.2
 	 *
-	 * @param  array  $attrs              List of attributes
-	 *
-	 * @return array                      Processed attributes with resolved dynamic values.
+	 * @param  array  $original_attrs List of attributes
+	 * 
+	 * @return array                  Processed attributes with resolved dynamic values.
 	 */
 	function process_dynamic_attrs( $original_attrs ) {
 		global $et_fb_processing_shortcode_object;
@@ -1554,18 +1571,20 @@ class ET_Builder_Element {
 	 *
 	 * @return string                     The module's HTML output.
 	 */
-	function _render( $attrs, $content = null, $render_slug, $parent_address = '', $global_parent = '', $global_parent_type = '' ) {
-		global $et_fb_processing_shortcode_object;
-
-		$this->attrs_unprocessed = $attrs;
+	function _render( $attrs, $content = null, $render_slug, $parent_address = '', $global_parent = '', $global_parent_type = '', $parent_type = '' ) {
+		global $et_fb_processing_shortcode_object, $et_pb_current_parent_type;
 
 		$enabled_dynamic_attributes = $this->_get_enabled_dynamic_attributes( $attrs );
+
+		$attrs = $this->_encode_legacy_dynamic_content( $attrs, $enabled_dynamic_attributes );
+
+		$this->attrs_unprocessed = $attrs;
 
 		$attrs = $this->process_dynamic_attrs( $attrs );
 
 		$this->props = shortcode_atts( $this->resolve_conditional_defaults($attrs, $render_slug), $attrs );
 
-		$this->_decode_double_quotes( $enabled_dynamic_attributes );
+		$this->_decode_double_quotes( $enabled_dynamic_attributes, $et_fb_processing_shortcode_object );
 
 		$this->_maybe_remove_global_default_values_from_props();
 
@@ -1629,7 +1648,10 @@ class ET_Builder_Element {
 
 		//override module attributes for global module. Skip that step while processing Frontend Builder object
 		if ( ! empty( $global_module_id ) && ! $et_fb_processing_shortcode_object ) {
-			$global_module_data = et_pb_load_global_module( $global_module_id );
+			// Update render_slug when rendering global rows inside Specialty sections.
+			$render_slug = 'et_pb_specialty_column' === $et_pb_current_parent_type && 'et_pb_row' === $render_slug ? 'et_pb_row_inner' : $render_slug;
+
+			$global_module_data = et_pb_load_global_module( $global_module_id, $render_slug );
 
 			if ( '' !== $global_module_data ) {
 				$unsynced_global_attributes = get_post_meta( $global_module_id, '_et_pb_excluded_global_options' );
@@ -1645,7 +1667,9 @@ class ET_Builder_Element {
 				}
 
 				if ( $content_synced ) {
-					$global_content = et_pb_get_global_module_content( $global_module_data, $render_slug );
+					// Set the flag showing if we load inner row
+					$load_inner_row = 'et_pb_row_inner' === $render_slug;
+					$global_content = et_pb_get_global_module_content( $global_module_data, $render_slug, $load_inner_row );
 				}
 
 				if ( in_array($render_slug, array('et_pb_code', 'et_pb_fullwidth_code')) ) {
@@ -1655,6 +1679,7 @@ class ET_Builder_Element {
 				// cleanup the shortcode string to avoid the attributes messing with content
 				$global_content_processed = false !== $global_content ? str_replace( $global_content, '', $global_module_data ) : $global_module_data;
 				$global_atts = shortcode_parse_atts( et_pb_remove_shortcode_content( $global_content_processed, $this->slug ) );
+				$global_atts = $this->_encode_legacy_dynamic_content( $global_atts, $enabled_dynamic_attributes );
 
 				// reset module addresses because global items will be processed once again and address will be incremented wrongly
 				if ( false !== strpos( $render_slug, '_section' ) ) {
@@ -1693,11 +1718,9 @@ class ET_Builder_Element {
 					}
 				}
 
-				$enabled_dynamic_attributes_global = $this->_get_enabled_dynamic_attributes( $this->props );
-
 				$this->props = $this->process_dynamic_attrs( $this->props );
 
-				$this->_decode_double_quotes( $enabled_dynamic_attributes_global );
+				$this->_decode_double_quotes( array(), $et_fb_processing_shortcode_object );
 			}
 		}
 
@@ -1705,8 +1728,12 @@ class ET_Builder_Element {
 
 		$this->before_render();
 
-		$this->content_unprocessed = (false !== $global_content ? $global_content : $content);
-		$content = $this->_resolve_value(
+		$this->content_unprocessed  = $this->_encode_legacy_dynamic_content_value(
+			'content',
+			false !== $global_content ? $global_content : $content,
+			$enabled_dynamic_attributes
+		);
+		$content                    = $this->_resolve_value(
 			$this->get_the_ID(),
 			'content',
 			$this->content_unprocessed,
@@ -1807,7 +1834,7 @@ class ET_Builder_Element {
 			}
 
 			// Try to apply old method for plugins without vb support
-			if ( 'on' !== $this->vb_support ) {
+			if ( ! $et_fb_processing_shortcode_object && 'on' !== $this->vb_support ) {
 				add_filter( "{$render_slug}_shortcode_output", array( $this, 'add_et_animated_class' ), 10, 2 );
 			}
 
@@ -1833,7 +1860,7 @@ class ET_Builder_Element {
 			if ( $module_class ) {
 				et_builder_handle_link_options_data( array(
 					'class'  => trim( $module_class ),
-					'url'    => esc_url( $link_option_url ),
+					'url'    => esc_url_raw( $link_option_url ),
 					'target' => 'on' === $link_option_url_new_window ? '_blank' : '_self',
 				) );
 			}
@@ -1860,8 +1887,21 @@ class ET_Builder_Element {
 			}
 		}
 
+		if ( ! $et_fb_processing_shortcode_object ) {
+			if ( 'et_pb_section' === $render_slug ) {
+				$et_pb_current_parent_type = isset( $this->props['specialty'] ) && 'on' === $this->props['specialty'] ? 'et_pb_specialty_section' : 'et_pb_section';
+			} else if ( 'et_pb_specialty_section' === $et_pb_current_parent_type && 'et_pb_column' === $render_slug ) {
+				$et_pb_current_parent_type = 'et_pb_specialty_column';
+			}
+
+			// Make sure content of Specialty Section is valid and has correct structure. Fix inner shortcode tags if needed.
+			if ( 'et_pb_specialty_section' === $et_pb_current_parent_type ) {
+				$content = $this->et_pb_maybe_fix_specialty_columns( $content );
+			}
+		}
+
 		$render_method = $et_fb_processing_shortcode_object ? 'render_as_builder_data' : 'render';
-		$output        = $this->{$render_method}( $attrs, $content, $render_slug, $parent_address, $global_parent, $global_parent_type );
+		$output        = $this->{$render_method}( $attrs, $content, $render_slug, $parent_address, $global_parent, $global_parent_type, $parent_type );
 
 		// Wrap 3rd party module rendered output with proper module wrapper
 		// @TODO implement module wrapper on official module
@@ -1936,7 +1976,7 @@ class ET_Builder_Element {
 	 * @return string
 	 */
 	function add_et_animated_class( $output, $module_slug ) {
-		if ( in_array( $module_slug,  ET_Builder_Element::$uses_module_classname ) ) {
+		if ( ! is_string( $output ) || in_array( $module_slug,  ET_Builder_Element::$uses_module_classname ) ) {
 			return $output;
 		}
 
@@ -2074,6 +2114,32 @@ class ET_Builder_Element {
 	}
 
 	/**
+	 * Replace the et_pb_row with et_pb_row_inner and et_pb_column with et_pb_column_inner.
+	 * Used as a callback function in {@self::et_pb_maybe_fix_specialty_columns} when fixing content of Specialty Sections
+	 *
+	 * @since 3.19.16
+	 *
+	 * @return string Shortcode string.
+	 */
+	public function et_pb_fix_specialty_columns( $rows ) {
+		$sanitized_shortcode = str_replace( array( 'et_pb_row ', 'et_pb_row]' ), array( 'et_pb_row_inner ', 'et_pb_row_inner]' ), $rows[0] );
+		$sanitized_shortcode = str_replace( array( 'et_pb_column ', 'et_pb_column]' ), array( 'et_pb_column_inner ', 'et_pb_column_inner]' ), $rows[0] );
+
+		return $sanitized_shortcode;
+	}
+
+	/**
+	 * Run regex against the Specialty Section content to find and fix invalid inner shortcodes
+	 *
+	 * @since 3.19.16
+	 *
+	 * @return string Shortcode string.
+	 */
+	public function et_pb_maybe_fix_specialty_columns( $section_content ) {
+		return preg_replace_callback('/(\[et_pb_(row |row_inner) .*?\].*\[\/et_pb_(row |row_inner)\])/mis', array( $this, 'et_pb_fix_specialty_columns' ), $section_content );
+	}
+
+	/**
 	 * Generates data used to render the module in the builder.
 	 * See {@see self::render()} for parameter info.
 	 *
@@ -2082,7 +2148,7 @@ class ET_Builder_Element {
 	 *
 	 * @return array|string An array when called during AJAX request, an empty string otherwise.
 	 */
-	public function render_as_builder_data( $atts, $content = null, $render_slug, $parent_address = '', $global_parent = '', $global_parent_type = '' ) {
+	public function render_as_builder_data( $atts, $content = null, $render_slug, $parent_address = '', $global_parent = '', $global_parent_type = '', $parent_type = '' ) {
 		global $post;
 
 		// this is called during pageload, but we want to ignore that round, as this data will be built and returned on separate ajax request instead
@@ -2108,6 +2174,20 @@ class ET_Builder_Element {
 			}
 		}
 
+		$output_render_slug = $render_slug;
+
+		// When rendering specialty columns we should make sure correct tags are used for inner content
+		// Global Rows inside may break it in some cases, so handle it.
+		if ( 'et_pb_specialty_column' === $parent_type && 'et_pb_row' === $render_slug ) {
+			$output_render_slug = 'et_pb_row_inner';
+			$function_name_processed = 'et_pb_row_inner';
+		}
+
+		if ( 'et_pb_row_inner' === $parent_type && 'et_pb_column' === $render_slug ) {
+			$output_render_slug = 'et_pb_column_inner';
+			$function_name_processed = 'et_pb_column_inner';
+		}
+
 		$post_id = isset( $post->ID ) ? $post->ID : intval( self::$_->array_get( $_POST, 'et_post_id' ) );
 		$post_type = isset( $post->post_type ) ? $post->post_type : sanitize_text_field( self::$_->array_get( $_POST, 'et_post_type' ) );
 		$layout_type = isset( $post_type, $post_id ) && 'et_pb_layout' === $post_type ? et_fb_get_layout_type( $post_id ) : '';
@@ -2130,7 +2210,7 @@ class ET_Builder_Element {
 				$use_updated_global_sync_method = ! empty( $unsynced_global_attributes );
 			}
 
-			$global_module_data = et_pb_load_global_module( $global_module_id );
+			$global_module_data = et_pb_load_global_module( $global_module_id, $function_name_processed );
 
 			if ( '' !== $global_module_data ) {
 				$unsynced_options = ! empty( $unsynced_global_attributes[0] ) ? json_decode( $unsynced_global_attributes[0], true ) : array() ;
@@ -2150,7 +2230,7 @@ class ET_Builder_Element {
 					// When saving global rows from specialty sections, they get saved as et_pb_row instead of et_pb_row_inner.
 					// Handle this special case when parsing to avoid empty global row content.
 					if ( empty( $global_content ) && 'et_pb_row_inner' === $function_name_processed ) {
-						$global_content = et_pb_get_global_module_content( $global_module_data, 'et_pb_row' );
+						$global_content = et_pb_get_global_module_content( $global_module_data, 'et_pb_row', true );
 					}
 				}
 
@@ -2174,6 +2254,27 @@ class ET_Builder_Element {
 
 				// Run et_pb_module_shortcode_attributes filter to apply migration system on attributes of global module
 				$global_atts = apply_filters( 'et_pb_module_shortcode_attributes', $global_atts, $atts, $this->slug, $this->generate_element_address( $render_slug ), $content );
+
+				// Parse dynamic content in global attributes.
+				$enabled_dynamic_attributes = $this->_get_enabled_dynamic_attributes( $global_atts );
+				$global_atts = $this->_encode_legacy_dynamic_content( $global_atts, $enabled_dynamic_attributes );
+				$global_atts = $this->process_dynamic_attrs( $global_atts );
+
+				// Parse dynamic content in global content.
+				if ( false !== $global_content ) {
+					$global_content = $this->_encode_legacy_dynamic_content_value(
+						'content',
+						$global_content,
+						$enabled_dynamic_attributes
+					);
+					$global_content = $this->_resolve_value(
+						$this->get_the_ID(),
+						'content',
+						$global_content,
+						$this->_get_enabled_dynamic_attributes( $global_atts ),
+						true
+					);
+				}
 
 				foreach( $this->props as $single_attr => $value ) {
 					if ( isset( $global_atts[$single_attr] ) && ! in_array( $single_attr, $unsynced_options ) ) {
@@ -2279,7 +2380,23 @@ class ET_Builder_Element {
 		}
 
 		$processed_content = false !== $global_content ? $global_content : $this->content;
-		$content = array_key_exists( 'content', $this->fields_unprocessed ) || 'et_pb_code' === $function_name_processed || 'et_pb_fullwidth_code' === $function_name_processed ? $processed_content : et_fb_process_shortcode( $processed_content, $address, $global_parent, $global_parent_type );
+
+		// Determine the parent type to send it down the tree while processing shortcode
+		// Main purpose is to know when we rendering Specialty Section content.
+		if ( 'et_pb_section' === $render_slug ) {
+			$parent_type = isset( $attrs['specialty'] ) && 'on' === $attrs['specialty'] ? 'et_pb_specialty_section' : 'et_pb_section';
+		} else if ( 'et_pb_specialty_section' === $parent_type && 'et_pb_column' === $render_slug ) {
+			$parent_type = 'et_pb_specialty_column';
+		} else {
+			$parent_type = $render_slug;
+		}
+
+		// Make sure content of Specialty Section is valid and has correct structure. Fix inner shortcode tags if needed.
+		if ( 'et_pb_specialty_section' === $parent_type ) {
+			$processed_content = $this->et_pb_maybe_fix_specialty_columns( $processed_content );
+		}
+
+		$content = array_key_exists( 'content', $this->fields_unprocessed ) || 'et_pb_code' === $function_name_processed || 'et_pb_fullwidth_code' === $function_name_processed ? $processed_content : et_fb_process_shortcode( $processed_content, $address, $global_parent, $global_parent_type, $parent_type );
 
 		// Global Code module content should be decoded before passing to VB.
 		$is_global_code = in_array( $function_name_processed, array( 'et_pb_code', 'et_pb_fullwidth_code' ) );
@@ -2331,7 +2448,7 @@ class ET_Builder_Element {
 			'vb_support'                  => $this->vb_support,
 			'parent_address'              => $parent_address,
 			'shortcode_index'             => $render_count,
-			'type'                        => $render_slug,
+			'type'                        => $output_render_slug,
 			'component_path'              => $component_path,
 			'main_css_element'            => $this->main_css_element,
 			'attrs'                       => $attrs,
@@ -2465,6 +2582,8 @@ class ET_Builder_Element {
 
 		$this->_add_box_shadow_fields();
 
+		$this->_add_transforms_fields();
+
 		$this->_add_text_fields();
 
 		$this->_add_max_width_fields();
@@ -2481,6 +2600,8 @@ class ET_Builder_Element {
 		$this->_add_animation_fields();
 
 		$this->_add_additional_transition_fields();
+
+		$this->_add_additional_z_index_fields();
 
 		// Add text shadow fields to all modules
 		$this->_add_text_shadow_fields();
@@ -2612,7 +2733,7 @@ class ET_Builder_Element {
 				$additional_options["{$option_name}_font"] = wp_parse_args( $option_settings['font'], array(
 					'label'           => sprintf( esc_html__( '%1$s Font', 'et_builder' ), $option_settings['label'] ),
 					'type'            => 'font',
-					'group_label'     => esc_html__( $option_settings['label'] ),
+					'group_label'     => et_core_esc_previously( $option_settings['label'] ),
 					'option_category' => 'font_option',
 					'tab_slug'        => $tab_slug,
 					'toggle_slug'     => $toggle_slug,
@@ -3200,6 +3321,36 @@ class ET_Builder_Element {
 			$message = "You're Doing It Wrong! '_add_additional_border_fields' is deprecated. All the Border settings should be defined via provided API";
 			et_debug( $message );
 		}
+	}
+
+	protected function _add_transforms_fields() {
+		$this->advanced_fields['transform'] = self::$_->array_get( $this->advanced_fields, 'transform', array() );
+
+		// Transforms Disabled
+		if ( false === $this->advanced_fields['transform'] ) {
+			return;
+		}
+
+		// Transforms settings have to be array
+		if ( ! is_array( $this->advanced_fields['transform'] ) ) {
+			return;
+		}
+
+		if ( isset( $this->type ) && 'child' === $this->type ) {
+			return;
+		}
+
+		$this->settings_modal_toggles['advanced']['toggles']['transform'] = array(
+			'title'    => esc_html__( 'Transform', 'et_builder' ),
+			'priority' => 109,
+		);
+
+		$this->_additional_fields_options = array_merge(
+			$this->_additional_fields_options,
+			/** @see ET_Builder_Module_Field_Transform::get_fields() */
+			ET_Builder_Module_Fields_Factory::get( 'Transform' )->get_fields()
+		);
+
 	}
 
 	protected function _add_max_width_fields() {
@@ -4408,6 +4559,45 @@ class ET_Builder_Element {
 		$this->_additional_fields_options = array_merge( $this->_additional_fields_options, $additional_options );
 	}
 
+	private function _add_additional_z_index_fields() {
+
+		$this->advanced_fields['z_index'] = self::$_->array_get( $this->advanced_fields, 'z_index', array() );
+
+		$additional_options = array();
+
+		$additional_options['z_index'] = array(
+			'label'            => esc_html__( 'Z Index', 'et_builder' ),
+			'type'             => 'range',
+			'range_settings'   => array(
+				'min'  => 0,
+				'max'  => 999,
+				'step' => 1,
+			),
+			'option_category'  => 'layout',
+			'default'          => '0',
+			'default_on_child' => true,
+			'tab_slug'         => 'custom_css',
+			'toggle_slug'      => 'visibility',
+			'unitless'         => true,
+			'hover'            => 'tabs',
+			'responsive'       => true,
+			'mobile_options'   => true,
+			'description'      => esc_html__( 'Control element position on the z axis', 'et_builder' ),
+		);
+
+		$skip = array(
+			'type'        => 'skip',
+			'tab_slug'    => 'custom_css',
+			'toggle_slug' => 'visibility',
+		);
+
+		$additional_options['z_index_tablet']      = $skip;
+		$additional_options['z_index_phone']       = $skip;
+		$additional_options['z_index_last_edited'] = $skip;
+
+		$this->_additional_fields_options = array_merge( $this->_additional_fields_options, $additional_options );
+	}
+
 	/**
 	 * Add CSS filter controls (i.e. saturation, brightness, opacity) to the `_additional_fields_options` array.
 	 *
@@ -5064,6 +5254,20 @@ class ET_Builder_Element {
 		);
 	}
 
+	public function get_transition_transform_css_props( $module = null ) {
+		$key      = empty( $module ) ? '' : "$module.";
+		$suffix   = empty( $module ) ? '' : "_$module";
+		$selector = self::$_->array_get( $this->advanced_fields, "transform.{$key}css.main", '%%order_class%%' );
+		/** @var ET_Builder_Module_Field_Transform */
+		$defaults = array( 'scale', 'translate', 'rotate', 'skew', 'origin' );
+		$fields   = array();
+		foreach ( $defaults as $name ) {
+			$fields += array( "transform_{$name}{$suffix}" => array( 'transform' => implode( ', ', (array) $selector ) ) );
+		}
+
+		return $fields;
+	}
+
 	public function get_transition_font_fields_css_props() {
 		$items = self::$_->array_get( $this->advanced_fields, 'fonts' );
 
@@ -5190,6 +5394,7 @@ class ET_Builder_Element {
 		$fields = array_merge( $this->get_transition_button_fields_css_props(), $fields );
 		$fields = array_merge( $this->get_transition_font_fields_css_props(), $fields );
 		$fields = array_merge( $this->get_transition_gutter_fields_css_props(), $fields );
+		$fields = array_merge( $this->get_transition_transform_css_props(), $fields );
 
 		return apply_filters( 'et_builder_hover_transitions_map', $fields );
 	}
@@ -5546,29 +5751,37 @@ class ET_Builder_Element {
 
 		// Add general fields for modules. Don't add them to module item and column
 		if ( ( ! isset( $this->type ) || 'child' !== $this->type ) && 'et_pb_column' !== $this->slug ) {
-			$fields = array_merge( $fields, apply_filters( 'et_builder_module_general_fields', array(
-				'disabled_on' => array(
-					'label'           => esc_html__( 'Disable on', 'et_builder' ),
-					'type'            => 'multiple_checkboxes',
-					'options'         => array(
-						'phone'   => esc_html__( 'Phone', 'et_builder' ),
-						'tablet'  => esc_html__( 'Tablet', 'et_builder' ),
-						'desktop' => esc_html__( 'Desktop', 'et_builder' ),
+			$disabled_on_fields = array();
+
+			// Add fields based on Role Capability
+			if ( et_pb_is_allowed( 'disable_module' ) ) {
+				$disabled_on_fields = array(
+					'disabled_on' => array(
+						'label'           => esc_html__( 'Disable on', 'et_builder' ),
+						'type'            => 'multiple_checkboxes',
+						'options'         => array(
+							'phone'   => esc_html__( 'Phone', 'et_builder' ),
+							'tablet'  => esc_html__( 'Tablet', 'et_builder' ),
+							'desktop' => esc_html__( 'Desktop', 'et_builder' ),
+						),
+						'additional_att'  => 'disable_on',
+						'option_category' => 'configuration',
+						'description'     => esc_html__( 'This will disable the module on selected devices', 'et_builder' ),
+						'tab_slug'        => 'custom_css',
+						'toggle_slug'     => 'visibility',
 					),
-					'additional_att'  => 'disable_on',
-					'option_category' => 'configuration',
-					'description'     => esc_html__( 'This will disable the module on selected devices', 'et_builder' ),
-					'tab_slug'        => 'custom_css',
-					'toggle_slug'     => 'visibility',
-				),
-				'admin_label' => array(
+				);
+			}
+
+			$common_general_fields = array(
+				'admin_label'  => array(
 					'label'           => esc_html__( 'Admin Label', 'et_builder' ),
 					'type'            => 'text',
 					'option_category' => 'configuration',
 					'description'     => esc_html__( 'This will change the label of the module in the builder for easy identification.', 'et_builder' ),
 					'toggle_slug'     => 'admin_label',
 				),
-				'module_id' => array(
+				'module_id'    => array(
 					'label'           => esc_html__( 'CSS ID', 'et_builder' ),
 					'type'            => 'text',
 					'option_category' => 'configuration',
@@ -5584,7 +5797,11 @@ class ET_Builder_Element {
 					'toggle_slug'     => 'classes',
 					'option_class'    => 'et_pb_custom_css_regular',
 				),
-			) ) );
+			);
+
+			$general_fields = array_merge( $disabled_on_fields, $common_general_fields );
+
+			$fields = array_merge( $fields, apply_filters( 'et_builder_module_general_fields', $general_fields ) );
 		}
 
 		return $fields;
@@ -8556,6 +8773,10 @@ class ET_Builder_Element {
 
 		$this->process_box_shadow( $function_name );
 
+		$this->process_transform( $function_name );
+
+		$this->process_z_index( $function_name );
+
 		$this->setup_hover_transitions( $function_name );
 	}
 
@@ -9405,6 +9626,124 @@ class ET_Builder_Element {
 		}
 	}
 
+	function process_transform( $function_name ) {
+
+		$transform = self::$_->array_get( $this->advanced_fields, 'transform', array() );
+
+		if ( false === $transform || ! is_array( $transform ) ) {
+			return;
+		}
+
+		$selector            = self::$_->array_get( $transform, 'css.main', '%%order_class%%' );
+		$important           = self::$_->array_get( $transform, 'css.important', false );
+		$hover               = et_pb_hover_options();
+		$isHoverEnabled      = $hover->is_enabled( 'transform_styles', $this->props, '' );
+		$isResponsiveEnabled = isset( $this->props['transform_styles_last_edited'] )
+							   && et_pb_get_responsive_status( $this->props['transform_styles_last_edited'] );
+
+		/** @var $class ET_Builder_Module_Field_Transform */
+		$class = ET_Builder_Module_Fields_Factory::get( 'Transform' );
+		$class->set_props( $this->props );
+
+		$views = array( 'desktop' );
+		if ( $isHoverEnabled ) {
+			array_push( $views, 'hover' );
+		}
+		if ( $isResponsiveEnabled ) {
+			array_push( $views, 'tablet', 'phone' );
+		}
+		foreach ( $views as $view ) {
+			$viewSelector = $selector;
+			$media_query  = array();
+			if ( 'hover' === $view ) {
+				$viewSelector = $selector . ':hover';
+			} elseif ( 'tablet' === $view ) {
+				$media_query = array(
+					'media_query' => ET_Builder_Element::get_media_query( 'max_width_980' ),
+				);
+			} elseif ( 'phone' === $view ) {
+				$media_query = array(
+					'media_query' => ET_Builder_Element::get_media_query( 'max_width_767' ),
+				);
+			}
+			$declaration = $class->get_declaration( $important, $view );
+			if ( ! empty( $declaration ) ) {
+				self::set_style( $function_name,
+					array(
+						'selector'    => $viewSelector,
+						'declaration' => $declaration,
+						'priority'    => $this->_style_priority,
+					) + $media_query );
+			}
+		}
+	}
+
+	function process_z_index( $function_name ) {
+		$setting             = 'z_index';
+		$selector            = '%%order_class%%';
+		$hover               = et_pb_hover_options();
+		$isHoverEnabled      = $hover->is_enabled( $setting, $this->props, '' );
+		$isResponsiveEnabled = isset( $this->props["${setting}_last_edited"] )
+							   && et_pb_get_responsive_status( $this->props["${setting}_last_edited"] );
+		$settingDefault      = '0';
+		$views               = array( 'desktop' );
+
+		if ( $isHoverEnabled ) {
+			array_push( $views, 'hover' );
+		}
+
+		if ( $isResponsiveEnabled ) {
+			array_push( $views, 'tablet', 'phone' );
+		}
+
+		foreach ( $views as $view ) {
+			$viewSelector = $selector;
+			$media_query  = array();
+			$suffix       = '';
+			if ( 'hover' === $view ) {
+				$viewSelector .= ':hover';
+				$suffix       = '__hover';
+			} elseif ( 'tablet' === $view ) {
+				$media_query = array(
+					'media_query' => ET_Builder_Element::get_media_query( 'max_width_980' ),
+				);
+				$suffix      = '_tablet';
+			} elseif ( 'phone' === $view ) {
+				$media_query = array(
+					'media_query' => ET_Builder_Element::get_media_query( 'max_width_767' ),
+				);
+				$suffix      = '_phone';
+			}
+
+			$optionValue = isset( $this->props[ $setting . $suffix ] ) && ! empty( $this->props[ $setting . $suffix ] ) ?
+				$this->props[ $setting . $suffix ] : $settingDefault;
+
+			$defaultValue = $settingDefault;
+			if ( 'hover' === $view && isset( $this->props[ $setting ] ) ) {
+				$defaultValue = empty( $this->props[ $setting ] ) ? $settingDefault : $this->props[ $setting ];
+				if ( ! isset( $this->props[ $setting . $suffix ] ) || empty( $this->props[ $setting . $suffix ] ) ) {
+					$optionValue = $defaultValue;
+				}
+			} elseif ( 'tablet' === $view && isset( $this->props[ $setting ] ) ) {
+				$defaultValue = empty( $this->props[ $setting ] ) ? $settingDefault : $this->props[ $setting ];
+			} elseif ( 'phone' === $view && isset( $this->props[ $setting . '_tablet' ] ) ) {
+				$defaultValue = empty( $this->props[ $setting . '_tablet' ] ) ? 'none' : $this->props[ $setting . '_tablet' ];
+				if ( 'none' === $defaultValue ) {
+					$defaultValue = ! isset( $this->props[ $setting ] )
+									|| empty( $this->props[ $setting ] ) ? $settingDefault : $this->props[ $setting ];
+				}
+			}
+			if ( $defaultValue != $optionValue || $isHoverEnabled ) {
+				self::set_style( $function_name,
+					array(
+						'selector'    => $viewSelector,
+						'declaration' => "z-index: $optionValue;",
+						'priority'    => $this->_style_priority,
+					) + $media_query );
+			}
+		}
+	}
+
 	/**
 	 * Adds Filter styles to the page custom css code
 	 *
@@ -9452,7 +9791,7 @@ class ET_Builder_Element {
 			$max_width_tablet      = self::$_->array_get( $this->props, 'max_width_tablet', '' );
 			$max_width_phone       = self::$_->array_get( $this->props, 'max_width_phone', '' );
 			$max_width_hover       = $hover->get_value( 'max_width', $this->props, '' );
-			$max_width_last_edited = $this->props['max_width_last_edited'];
+			$max_width_last_edited = self::$_->array_get( $this->props, 'max_width_last_edited', '' );
 			$max_width_responsive_active = et_pb_get_responsive_status( $max_width_last_edited );
 
 			if ( $max_width_responsive_active ) {
@@ -10532,6 +10871,18 @@ class ET_Builder_Element {
 		$shortcodes[] = $this->slug;
 
 		return $shortcodes;
+	}
+
+	function fix_wptexturized_script( $matches ) {
+		return str_replace( '&#038;', '&', $matches[0] );
+	}
+
+	function fix_wptexturized_scripts( $content ) {
+		return preg_replace_callback(
+			'/<script.*?>(.*?)<\/script>/mis',
+			array( $this, 'fix_wptexturized_script' ),
+			$content
+		);
 	}
 
 	static function compare_by_priority( $a, $b ) {
@@ -12697,6 +13048,50 @@ class ET_Builder_Element {
 	}
 
 	/**
+	 * Re-encode legacy dynamic content values in an attrs array.
+	 *
+	 * @since 3.20.2
+	 *
+	 * @param array<string, string> $attrs
+	 * @param array<string> $enabled_dynamic_attributes
+	 *
+	 * @return array<string, string>
+	 */
+	protected function _encode_legacy_dynamic_content( $attrs, $enabled_dynamic_attributes ) {
+		if ( is_array( $attrs ) ) {
+			foreach ( $attrs as $field => $value ) {
+				$attrs[ $field ] = $this->_encode_legacy_dynamic_content_value( $field, $value, $enabled_dynamic_attributes );
+			}
+		}
+
+		return $attrs;
+	}
+
+	/**
+	 * Re-encode legacy dynamic content value.
+	 *
+	 * @since 3.20.2
+	 *
+	 * @param string $field
+	 * @param string $value
+	 *
+	 * @return string
+	 */
+	protected function _encode_legacy_dynamic_content_value( $field, $value, $enabled_dynamic_attributes ) {
+		if ( ! in_array( $field, $enabled_dynamic_attributes ) ) {
+			return $value;
+		}
+
+		$json = et_builder_clean_dynamic_content( $value );
+
+		if ( preg_match( '/^@ET-DC@(.*?)@$/', $json ) ) {
+			return $value;
+		}
+
+		return $this->_resolve_value_from_json( $field, $json, $enabled_dynamic_attributes );
+	}
+
+	/**
 	 * Resolve a value, be it static or dynamic to a static one.
 	 *
 	 * @since 3.17.2
@@ -12721,6 +13116,62 @@ class ET_Builder_Element {
 		}
 
 		return $builder_value->resolve( $post_id );
+	}
+
+	/**
+	 * Resolve a value from the legacy JSON format of dynamic content.
+	 * This is essentially a migration but is implemented separately
+	 * as it needs to parse every field of every module and do it
+	 * before actual migrations are ran.
+	 *
+	 * @since 3.20.2
+	 *
+	 * @param integer $post_id
+	 * @param string $field
+	 * @param string $value
+	 * @param array<string> $enabled_dynamic_attributes
+	 * @param boolean $serialize
+	 *
+	 * @return string
+	 */
+	protected function _resolve_value_from_json( $field, $value, $enabled_dynamic_attributes ) {
+		if ( ! in_array( $field, $enabled_dynamic_attributes ) ) {
+			return $value;
+		}
+
+		$json = et_builder_clean_dynamic_content( $value );
+
+		// Replace encoded quotes.
+		$json = str_replace( array( '&#8220;', '&#8221;', '&#8243;', "%22" ), '"', $json );
+
+		// Strip <p></p> artifacts from wpautop in before/after settings. Example:
+		// {"dynamic":true,"content":"post_title","settings":{"before":"</p>
+		// <h1>","after":"</h1>
+		// <p>"}}
+		// This is a rough solution implemented due to time constraints.
+		$json = preg_replace( '~
+			("(?:before|after)":")    # $1 = Anchor to the before/after settings.
+			(?:                       # Match cases where the value starts with the offending tag.
+				<\/?p>                # The root of all evil.
+				[\r\n]+               # Whitespace follows the tag.
+			)*
+			(?:                       # Match cases where the value ends with the offending tag.
+				([^"]*)               # $2 = The preceeding value.
+				[\r\n]+               # Whitespace preceedes the tag.
+				<\/?p>                # The root of all evil.
+			)*
+		~xi', '$1$2', $json );
+
+		// Remove line-breaks which break the json strings.
+		$json = preg_replace( '/\r|\n/', '', $json );
+
+		$json_value = et_builder_parse_dynamic_content_json( $json );
+
+		if ( null === $json_value ) {
+			return $value;
+		}
+
+		return $json_value->serialize();
 	}
 
 	/**

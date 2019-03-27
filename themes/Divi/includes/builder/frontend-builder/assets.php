@@ -58,16 +58,6 @@ function et_fb_enqueue_main_assets() {
 }
 add_action( 'wp_enqueue_scripts', 'et_fb_enqueue_main_assets' );
 
-function et_fb_enqueue_open_sans() {
-	$protocol = is_ssl() ? 'https' : 'http';
-	$query_args = array(
-		'family' => 'Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800',
-		'subset' => 'latin,latin-ext',
-	);
-
-	wp_enqueue_style( 'et-fb-fonts', esc_url_raw( add_query_arg( $query_args, "$protocol://fonts.googleapis.com/css" ) ), array(), null );
-}
-
 function et_fb_enqueue_google_maps_dependency( $dependencies ) {
 
 	if ( et_pb_enqueue_google_maps_script() ) {
@@ -96,13 +86,16 @@ function et_fb_get_dynamic_asset( $prefix, $post_type = false, $update = false )
 		global $post;
 		$post_type = isset( $post->post_type ) ? $post->post_type : 'post';
 	}
-	
+
 	$post_type = sanitize_text_field( $post_type );
-	
+
 	if ( ! in_array( $prefix, array( 'helpers', 'definitions' ) ) ) {
 		$prefix = '';
 	}
-	$cache  = ET_Core_PageResource::get_cache_directory();
+
+	// Per language Cache due to definitions/helpers being localized.
+	$lang   = get_user_locale();
+	$cache  = sprintf( '%s/%s', ET_Core_PageResource::get_cache_directory(), $lang );
 	$files  = glob( sprintf( '%s/%s-%s-*.js', $cache, $prefix, $post_type ) );
 	$exists = is_array( $files ) && count( $files ) > 0;
 
@@ -129,10 +122,18 @@ function et_fb_get_dynamic_asset( $prefix, $post_type = false, $update = false )
 		}
 		if ( ( $update || ! $exists ) ) {
 
-			foreach ( $files as $file ) {
-				// Delete old version.
-				@unlink( $file );
+			if ( ET_BUILDER_KEEP_OLDEST_CACHED_ASSETS && count( $files ) > 0 ) {
+				// Files are ordered by timestamp, first one is always the oldest
+				array_shift( $files );
 			}
+
+			if ( ET_BUILDER_PURGE_OLD_CACHED_ASSETS ) {
+				foreach ( $files as $file ) {
+					// Delete old version.
+					@unlink( $file );
+				}
+			}
+
 			// Write the file only if it did not exist or its content changed
 			$uniq = str_replace( '.', '', (string) microtime( true ) );
 			$file = sprintf( '%s/%s-%s-%s.js', $cache, $prefix, $post_type, $uniq );
@@ -145,8 +146,9 @@ function et_fb_get_dynamic_asset( $prefix, $post_type = false, $update = false )
 	}
 
 	$url = ! $exists ? false : sprintf(
-		'%s/%s-%s-%s.js',
+		'%s/%s/%s-%s-%s.js',
 		content_url( ET_Core_PageResource::get_cache_directory( 'relative' ) ),
+		$lang,
 		$prefix,
 		$post_type,
 		$uniq
@@ -275,20 +277,7 @@ function et_fb_enqueue_assets() {
 		wp_enqueue_script( 'avada' );
 	}
 
-	$DEBUG        = defined( 'ET_DEBUG' ) && ET_DEBUG;
-	$core_scripts = ET_CORE_URL . 'admin/js';
-
-	if ( $DEBUG || DiviExtensions::is_debugging_extension() ) {
-		wp_enqueue_script( 'react', 'https://cdn.jsdelivr.net/npm/react@16.3.2/umd/react.development.js', array(), '16.3.2', true );
-		wp_enqueue_script( 'react-dom', 'https://cdn.jsdelivr.net/npm/react-dom@16.3.2/umd/react-dom.development.js', array( 'react' ), '16.3.2', true );
-		add_filter( 'script_loader_tag', 'et_core_add_crossorigin_attribute', 10, 3 );
-	} else {
-		// We used to load outdated 16.2.0 bundles marked as 16.3.2 which is why we have the
-		// extra .0 in the version number to act as a cache breaker. Next time the version is
-		// updated the extra .0 should be removed.
-		wp_enqueue_script( 'react', "{$core_scripts}/react.production.min.js", array(), '16.3.2.0', true );
-		wp_enqueue_script( 'react-dom', "{$core_scripts}/react-dom.production.min.js", array( 'react' ), '16.3.2.0', true );
-	}
+	et_fb_enqueue_react();
 
 	// Enqueue the appropriate bundle js (hot/start/build)
 	et_fb_enqueue_bundle( 'et-frontend-builder', 'bundle.js', $fb_bundle_dependencies );
@@ -325,6 +314,7 @@ function et_fb_enqueue_assets() {
 	do_action( 'et_fb_enqueue_assets' );
 }
 
+
 /**
  * Disable admin bar styling for HTML in VB. BFB doesn't loaded admin bar and  VB loads admin bar
  * on top window which makes built-in admin bar styling irrelevant because admin bar is affected by
@@ -354,6 +344,7 @@ function et_fb_output_wp_auth_check_html() {
 	echo et_core_intentionally_unescaped( $output, 'html' );
 }
 
+
 function et_fb_set_editor_available_cookie() {
 	global $post;
 	$post_id = isset( $post->ID ) ? $post->ID : false;
@@ -362,3 +353,26 @@ function et_fb_set_editor_available_cookie() {
 	}
 }
 add_action( 'et_fb_framework_loaded', 'et_fb_set_editor_available_cookie' );
+
+
+if ( ! function_exists( 'et_fb_enqueue_react' ) ):
+function et_fb_enqueue_react() {
+	$DEBUG         = defined( 'ET_DEBUG' ) && ET_DEBUG;
+	$core_scripts  = ET_CORE_URL . 'admin/js';
+	$react_version = '16.7.0';
+
+	wp_dequeue_script( 'react' );
+	wp_dequeue_script( 'react-dom' );
+	wp_deregister_script( 'react' );
+	wp_deregister_script( 'react-dom' );
+
+	if ( $DEBUG || DiviExtensions::is_debugging_extension() ) {
+		wp_enqueue_script( 'react', 'https://cdn.jsdelivr.net/npm/react@16/umd/react.development.js', array(), $react_version, true );
+		wp_enqueue_script( 'react-dom', 'https://cdn.jsdelivr.net/npm/react-dom@16/umd/react-dom.development.js', array( 'react' ), $react_version, true );
+		add_filter( 'script_loader_tag', 'et_core_add_crossorigin_attribute', 10, 3 );
+	} else {
+		wp_enqueue_script( 'react', "{$core_scripts}/react.production.min.js", array(), $react_version, true );
+		wp_enqueue_script( 'react-dom', "{$core_scripts}/react-dom.production.min.js", array( 'react' ), $react_version, true );
+	}
+}
+endif;

@@ -118,6 +118,7 @@ function et_fb_get_dynamic_backend_helpers() {
 	$utils       = ET_Core_Data_Utils::instance();
 	$layout_type = '';
 	$layout_scope = '';
+	$layout_built_for = '';
 
 	$post_type    = isset( $post->post_type ) ? $post->post_type : false;
 	$post_id      = isset( $post->ID ) ? $post->ID : false;
@@ -126,8 +127,9 @@ function et_fb_get_dynamic_backend_helpers() {
 	$current_user = wp_get_current_user();
 
 	if ( 'et_pb_layout' === $post_type ) {
-		$layout_type = et_fb_get_layout_type( $post_id );
-		$layout_scope = et_fb_get_layout_term_slug( $post_id, 'scope' );
+		$layout_type      = et_fb_get_layout_type( $post_id );
+		$layout_scope     = et_fb_get_layout_term_slug( $post_id, 'scope' );
+		$layout_built_for = get_post_meta( $post_id, '_et_pb_built_for_post_type', 'page' );
 	}
 
 	$current_url  = ( is_ssl() ? 'https://' : 'http://' ) . $_SERVER['HTTP_HOST'] . $_SERVER['REQUEST_URI'];
@@ -145,6 +147,8 @@ function et_fb_get_dynamic_backend_helpers() {
 	);
 
 	$helpers = array(
+		'site_url'                     => get_site_url(),
+		'locale'                       => get_user_locale(),
 		'debug'                        => defined( 'ET_DEBUG' ) && ET_DEBUG,
 		'postId'                       => $post_id,
 		'postTitle'                    => $post_title,
@@ -152,6 +156,7 @@ function et_fb_get_dynamic_backend_helpers() {
 		'postType'                     => $post_type,
 		'layoutType'                   => $layout_type,
 		'layoutScope'                  => $layout_scope,
+		'layoutBuiltFor'               => $layout_built_for,
 		'publishCapability'            => ( is_page() && ! current_user_can( 'publish_pages' ) ) || ( ! is_page() && ! current_user_can( 'publish_posts' ) ) ? 'no_publish' : 'publish',
 		'ajaxUrl'                      => is_ssl() ? admin_url( 'admin-ajax.php' ) : admin_url( 'admin-ajax.php', 'http' ),
 		'et_account'                   => $et_account,
@@ -185,6 +190,19 @@ function et_fb_get_dynamic_backend_helpers() {
 		'abTesting'                    => et_builder_ab_options( $post->ID ),
 		'conditionalTags'              => et_fb_conditional_tag_params(),
 		'commentsModuleMarkup'         => et_fb_get_comments_markup(),
+		/**
+		 * Filters taxonomies array.
+		 *
+		 * @param array Array of all registered taxonomies.
+		 */
+		'getTaxonomies'                => apply_filters( 'et_fb_taxonomies', et_fb_get_taxonomy_terms() ),
+
+		/**
+		 * Filters taxonomy labels.
+		 *
+		 * @param array Array of labels for all registered taxonomies.
+		 */
+		'getTaxonomyLabels'            => apply_filters( 'et_fb_taxonomy_labels', et_fb_get_taxonomy_labels() ),
 		'urls'                         => array(
 			'loginFormUrl'             => esc_url( site_url( 'wp-login.php', 'login_post' ) ),
 			'forgotPasswordUrl'        => esc_url( wp_lostpassword_url() ),
@@ -192,6 +210,10 @@ function et_fb_get_dynamic_backend_helpers() {
 			'logoutUrlRedirect'        => esc_url( wp_logout_url( $current_url ) ),
 			'themeOptionsUrl'          => esc_url( et_pb_get_options_page_link() ),
 			'builderPreviewStyle'      => ET_BUILDER_URI . '/styles/preview.css',
+			'themeCustomizerUrl'       => et_pb_is_allowed( 'theme_customizer' ) ? add_query_arg( array( 'et_customizer_option_set' => 'theme', 'url' => urlencode( $current_url ) ), admin_url( 'customize.php' ) ) : false,
+			'moduleCustomizerUrl'      => et_pb_is_allowed( 'theme_customizer' ) ? add_query_arg( array( 'et_customizer_option_set' => 'module', 'url' => urlencode( $current_url ) ), admin_url( 'customize.php' ) ) : false,
+			'roleEditorUrl'            => current_user_can( 'manage_options' ) ? add_query_arg( array( 'page' => 'et_divi_role_editor' ), admin_url( 'admin.php' ) ) : false,
+			'manageLibraryUrl'         => current_user_can( 'manage_options' ) ? add_query_arg( array( 'post_type' => 'et_pb_layout' ), admin_url( 'edit.php' ) ) : false,
 		),
 		'defaults'                     => array(
 			'et_pb_countdown_timer' => array(
@@ -262,11 +284,15 @@ function et_fb_get_static_backend_helpers($post_type) {
 	);
 
 	/**
+	 * App preferences
+	 */
+	$app_preferences = et_fb_app_preferences_settings();
+
+	/**
 	 * ETBuilderBackend
 	 * @var array $helpers
 	 */
 	$helpers = array(
-		'site_url'                     => get_site_url(),
 		'blog_id'                      => get_current_blog_id(),
 		'autosaveInterval'             => et_builder_autosave_interval(),
 		'isCustomPostType'             => et_builder_is_post_type_custom( $post_type ) ? 'yes' : 'no',
@@ -308,7 +334,7 @@ function et_fb_get_static_backend_helpers($post_type) {
 				'className'       => 'accent-purple',
 				'imgSrc'          => 'premade.png',
 				'imgSrcHover'     => 'premade.gif',
-				'titleText'       => esc_html__( 'Choose a premade Layout' ),
+				'titleText'       => esc_html__( 'Choose a premade Layout', 'et_builder' ),
 				'descriptionText' => esc_html__( 'Choose from hundreds of world-class premade layouts or start from any of your existing saved layouts.', 'et_builder' ),
 				'buttonText'      => esc_html__( 'Browse Layouts', 'et_builder' ),
 				'permission'      => array( 'load_layout' ),
@@ -386,25 +412,13 @@ function et_fb_get_static_backend_helpers($post_type) {
 		'builderVersion'               => ET_BUILDER_PRODUCT_VERSION,
 		'failureNotification'          => et_builder_get_failure_notification_modal(),
 		'noBuilderSupportNotification' => et_builder_get_no_builder_notification_modal(),
+		'noBrowserSupportNotification' => et_builder_get_no_browser_notification_modal(),
 		'exitNotification'             => et_builder_get_exit_notification_modal(),
 		'browserAutosaveNotification'  => et_builder_get_browser_autosave_notification_modal(),
 		'serverAutosaveNotification'   => et_builder_get_server_autosave_notification_modal(),
 		'unsavedNotification'          => et_builder_get_unsaved_notification_modal(),
 		'backupLabel'                  => __( 'Backup of %s', 'et_builder' ),
 
-		/**
-		 * Filters taxonomies array.
-		 *
-		 * @param array Array of all registered taxonomies.
-		 */
-		'getTaxonomies'                => apply_filters( 'et_fb_taxonomies', et_fb_get_taxonomy_terms() ),
-
-		/**
-		 * Filters taxonomy labels.
-		 *
-		 * @param array Array of labels for all registered taxonomies.
-		 */
-		'getTaxonomyLabels'            => apply_filters( 'et_fb_taxonomy_labels', et_fb_get_taxonomy_labels() ),
 		'googleAPIKey'                 => et_pb_is_allowed( 'theme_options' ) ? get_option( 'et_google_api_settings' ) : '',
 		'useGoogleFonts'               => $use_google_fonts,
 		'googleFontsList'              => array_keys( $google_fonts ),
@@ -418,7 +432,6 @@ function et_fb_get_static_backend_helpers($post_type) {
 		'fontIconsDown'                => et_pb_get_font_down_icon_symbols(),
 		'widgetAreas'                  => et_builder_get_widget_areas_list(),
 		'et_builder_fonts_data'        => et_builder_get_fonts(),
-		'locale'                       => get_locale(),
 		'roleSettings'                 => et_pb_get_role_settings(),
 		'optionsCategoriesPermissions' => array_keys( ET_Builder_Element::get_options_categories() ),
 		'classNames'                   => array(
@@ -1035,9 +1048,10 @@ function et_fb_get_static_backend_helpers($post_type) {
 
 			),
 		),
-		'knownShortcodeWrappers'           => et_fb_known_shortcode_wrappers(),
-		'acceptableCSSStringValues'    => et_builder_get_acceptable_css_string_values( 'all' ),
-		'customModuleCredits' => ET_Builder_Element::get_custom_modules_credits( $post_type ),
+		'knownShortcodeWrappers'    => et_fb_known_shortcode_wrappers(),
+		'acceptableCSSStringValues' => et_builder_get_acceptable_css_string_values( 'all' ),
+		'customModuleCredits'       => ET_Builder_Element::get_custom_modules_credits( $post_type ),
+		'ignoreAdminBarClickIds'    => apply_filters( 'et_fb_ignore_adminbar_click_ids', array() ),
 	);
 
 	$moduolesI10n = ET_Builder_Element::get_modules_i10n( $post_type );
@@ -1388,6 +1402,7 @@ function et_fb_get_static_backend_helpers($post_type) {
 			'find_replace'    => esc_html__( 'Find & Replace', 'et_builder' ),
 			'extend_styles'   => array(
 				'module'        => esc_html__( 'Extend %s Styles', 'et_builder' ),
+				'child_item'    => esc_html__( 'Extend Item Styles', 'et_builder' ),
 				'options_group' => esc_html__( 'Extend %s Styles', 'et_builder' ),
 				'option'        => esc_html__( 'Extend %s', 'et_builder' ),
 			),
@@ -1529,7 +1544,7 @@ function et_fb_get_static_backend_helpers($post_type) {
 				'tooltip'     => esc_html__( 'Replace', 'et_builder' ),
 				'find'        => array(
 					'label'       => esc_html__( 'Find This %s', 'et_builder' ),
-					'description' => esc_html__( 'The is the option value that will be replaced throughout your page. Where this option exists, within the defined scope, it will be replaced by the new value configured below.', 'et_builder' ),
+					'description' => esc_html__( 'This is the option value that will be replaced throughout your page. Where this option exists, within the defined scope, it will be replaced by the new value configured below.', 'et_builder' ),
 				),
 				'within'      => array(
 					'label'       => esc_html__( 'Within', 'et_builder' ),
@@ -1665,32 +1680,32 @@ function et_fb_get_static_backend_helpers($post_type) {
 					'page_creation_flow' => esc_html__( 'Page Creation Flow', 'et_builder' ),
 				),
 				'view_mode_select' => array(
-					'desktop'   => esc_html__( 'Desktop View' , 'et_builder' ),
-					'tablet'    => esc_html__( 'Tablet View' , 'et_builder' ),
-					'phone'     => esc_html__( 'Phone View' , 'et_builder' ),
-					'wireframe' => esc_html__( 'Wireframe View' , 'et_builder' ),
+					'desktop'   => $app_preferences['view_mode']['options']['desktop'],
+					'tablet'    => $app_preferences['view_mode']['options']['tablet'],
+					'phone'     => $app_preferences['view_mode']['options']['phone'],
+					'wireframe' => $app_preferences['view_mode']['options']['wireframe'],
 				),
 				'interaction_mode_select' => array(
-					'0' => esc_html__( 'Hover Mode' , 'et_builder' ),
-					'1' => esc_html__( 'Click Mode' , 'et_builder' ),
-					'2' => esc_html__( 'Grid Mode' , 'et_builder' ),
+					'0' => $app_preferences['event_mode']['options']['hover'],
+					'1' => $app_preferences['event_mode']['options']['click'],
+					'2' => $app_preferences['event_mode']['options']['grid'],
 				),
 				'history_intervals_select' => array(
-					'0' => esc_html__( 'After Every Action' , 'et_builder' ),
-					'1' => esc_html__( 'After Every 10th Action' , 'et_builder' ),
-					'2' => esc_html__( 'After Every 20th Action' , 'et_builder' ),
-					'3' => esc_html__( 'After Every 30th Action' , 'et_builder' ),
-					'4' => esc_html__( 'After Every 40th Action' , 'et_builder' ),
+					'0' => $app_preferences['history_intervals']['options']['1'],
+					'1' => $app_preferences['history_intervals']['options']['10'],
+					'2' => $app_preferences['history_intervals']['options']['20'],
+					'3' => $app_preferences['history_intervals']['options']['30'],
+					'4' => $app_preferences['history_intervals']['options']['40'],
 				),
 				'modal_default_select' => array(
-					'0' => esc_html__( 'Last Used Position', 'et_builder' ),
-					'1' => esc_html__( 'Floating Minimum Size', 'et_builder' ),
-					'2' => esc_html__( 'Fullscreen', 'et_builder' ),
-					'3' => esc_html__( 'Fixed Left Sidebar', 'et_builder' ),
-					'4' => esc_html__( 'Fixed Right Sidebar', 'et_builder' ),
-					'5' => esc_html__( 'Fixed Bottom Panel', 'et_builder' ),
+					'0' => $app_preferences['modal_preference']['options']['default'],
+					'1' => $app_preferences['modal_preference']['options']['minimum'],
+					'2' => $app_preferences['modal_preference']['options']['fullscreen'],
+					'3' => $app_preferences['modal_preference']['options']['left'],
+					'4' => $app_preferences['modal_preference']['options']['right'],
+					'5' => $app_preferences['modal_preference']['options']['bottom'],
 					// TODO, disabled until further notice (Issue #3930 & #5859)
-					// '6' => esc_html__( 'Fixed Top Panel', 'et_builder' ),
+					// '6' => $app_preferences['modal_preference']['options']['top'],
 				),
 				'builder_animation_toggle' => array(
 					'on'   => esc_html__( 'On', 'et_builder' ),
@@ -1709,10 +1724,10 @@ function et_fb_get_static_backend_helpers($post_type) {
 					'off'  => esc_html__( 'Off', 'et_builder' ),
 				),
 				'page_creation_flow_select' => array(
-					'0' => esc_html__( 'Give Me A Choice', 'et_builder' ),
-					'1' => esc_html__( 'Build From Scratch', 'et_builder' ),
-					'2' => esc_html__( 'Load Premade Layout', 'et_builder' ),
-					'3' => esc_html__( 'Clone Existing Page', 'et_builder' ),
+					'0' => $app_preferences['page_creation_flow']['options']['default'],
+					'1' => $app_preferences['page_creation_flow']['options']['build_from_scratch'],
+					'2' => $app_preferences['page_creation_flow']['options']['choose_premade_layout'],
+					'3' => $app_preferences['page_creation_flow']['options']['clone_existing_page'],
 				),
 			),
 		),
@@ -1908,7 +1923,7 @@ function et_fb_get_static_backend_helpers($post_type) {
 	foreach ( $i18n_files as $file ) {
 		$key = basename( $file, '.php' );
 
-		$helpers['i18n'][ $key ] = require $file;
+		$helpers['i18n'][ et_fb_camel_case( $key ) ] = require $file;
 	}
 
 	return $helpers;
@@ -1916,9 +1931,10 @@ function et_fb_get_static_backend_helpers($post_type) {
 
 // Used to update the content of the cached helper js file.
 function et_fb_get_asset_helpers( $content, $post_type ) {
+	$helpers = et_fb_get_static_backend_helpers( $post_type );
 	return sprintf(
 		'window.ETBuilderBackend = jQuery.extend(true, %s, window.ETBuilderBackendDynamic)',
-		json_encode( et_fb_get_static_backend_helpers( $post_type ) )
+		et_fb_remove_site_url_protocol( wp_json_encode( $helpers, ET_BUILDER_JSON_ENCODE_OPTIONS ) )
 	);
 }
 add_filter( 'et_fb_get_asset_helpers', 'et_fb_get_asset_helpers', 10, 2 );
@@ -1965,12 +1981,36 @@ function et_fb_fix_plugin_conflicts() {
 	// Disable Autoptimize plugin
 	remove_action( 'init', 'autoptimize_start_buffering', -1 );
 	remove_action( 'template_redirect', 'autoptimize_start_buffering', 2 );
-	
+
 	// Disable WP Super Cache when loading Divi Builder
 	if ( ! defined( 'DONOTCACHEPAGE' ) ) {
 		define( 'DONOTCACHEPAGE', true );
 	}
 }
+endif;
+
+/**
+ * Convert string to camel case format.
+ *
+ * @param string $string Original string data.
+ * @param array  $noStrip Additional regex pattern exclusion.
+ *
+ * @return string
+ */
+if ( ! function_exists( 'et_fb_camel_case' ) ) :
+	function et_fb_camel_case( $string, $noStrip = array() ) {
+		$words = preg_split( '/[^a-zA-Z0-9' . implode( '', $noStrip ) . ']+/i', strtolower( $string ) );
+
+		if ( count( $words ) === 1 ) {
+			return $words[0];
+		}
+
+		$camel_cased = implode( '', array_map( 'ucwords', $words ) );
+
+		$camel_cased[0] = strtolower( $camel_cased[0] );
+
+		return $camel_cased;
+	}
 endif;
 
 /**

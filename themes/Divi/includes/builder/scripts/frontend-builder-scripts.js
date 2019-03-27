@@ -1,8 +1,10 @@
+// Check whether current page is inside (visual) builder or not
+var isBuilder = 'object' === typeof window.ET_Builder;
+
 /*! ET frontend-builder-scripts.js */
 (function($){
 	var $et_window = $(window);
-	var $et_top_window = window.top ? window.top.jQuery(window.top) : $(window);
-	var isBuilder = $('body').hasClass('et-fb');
+	var $et_top_window = isBuilder ? window.top.jQuery(window.top) : $(window);
 	var isBFB = $('body').hasClass('et-bfb');
 	var isVB = isBuilder && !isBFB;
 	var isScrollOnAppWindow = function() {
@@ -38,7 +40,6 @@
 	};
 
 	window.et_pb_init_modules = function() {
-		isBuilder = $( 'body' ).hasClass( 'et-fb' );
 		isBFB     = $( 'body' ).hasClass( 'et-bfb' );
 		isVB      = isBuilder && !isBFB;
 
@@ -84,7 +85,8 @@
 				progress_timer_count = 0,
 				$et_pb_container = $et_slider.find( '.et_pb_container' ),
 				et_pb_container_width = $et_pb_container.width(),
-				is_post_slider = $et_slider.hasClass( 'et_pb_post_slider' );
+				is_post_slider = $et_slider.hasClass( 'et_pb_post_slider' ),
+				stop_slider = false;
 
 				$et_slider.et_animation_running = false;
 
@@ -216,8 +218,8 @@
 
 						$et_slider.addClass( 'et_slider_hovered' );
 
-						if ( typeof et_slider_timer != 'undefined' ) {
-							clearInterval( et_slider_timer );
+						if (typeof et_slider_timer !== 'undefined') {
+							clearTimeout(et_slider_timer);
 						}
 					}).on( 'mouseleave.et_pb_simple_slider', function() {
 						if ( $et_slider.hasClass( 'et_slider_auto_ignore_hover' ) ) {
@@ -232,7 +234,21 @@
 
 				et_slider_auto_rotate();
 
-				function et_slider_auto_rotate(){
+				function et_slider_auto_rotate() {
+					if (stop_slider) {
+						return;
+					}
+
+					// Slider animation can be dynamically paused with et_pb_pause_slider
+					// Make sure animation will start when class is removed by checking clas existence every 2 seconds.
+					if ($et_slider.hasClass('et_pb_pause_slider')) {
+						setTimeout(function() {
+							et_slider_auto_rotate();
+						}, 2000);
+
+						return;
+					}
+
 					if ( settings.slideshow && et_slides_number > 1 && ! $et_slider.hasClass( 'et_slider_hovered' ) ) {
 						et_slider_timer = setTimeout( function() {
 							$et_slider.et_slider_move_to( 'next' );
@@ -242,9 +258,11 @@
 
 				$et_slider.et_slider_destroy = function() {
 					// Clear existing timer / auto rotate
-					if ( typeof et_slider_timer != 'undefined' ) {
-						clearInterval( et_slider_timer );
+					if (typeof et_slider_timer !== 'undefined') {
+						clearTimeout(et_slider_timer);
 					}
+
+					stop_slider = true;
 
 					// Deregister all own existing events
 					$et_slider.off( '.et_pb_simple_slider' );
@@ -425,8 +443,9 @@
 
 					}
 
-					if ( typeof et_slider_timer != 'undefined' )
-						clearInterval( et_slider_timer );
+					if (typeof et_slider_timer !== 'undefined') {
+						clearTimeout(et_slider_timer);
+					}
 
 					var $next_slide	= $et_slide.eq( et_active_slide );
 
@@ -498,7 +517,12 @@
 							var active_slide_layout_bg_color = et_get_bg_layout_color( $active_slide ),
 								next_slide_layout_bg_color = et_get_bg_layout_color( $next_slide );
 
-							$(this).css('display', 'none').removeClass( 'et_slide_transition' );
+							// Builder dynamically updates the slider options, so no need to set `display: none;` because it creates unwanted visual effects.
+							if (isBuilder) {
+								$(this).removeClass( 'et_slide_transition' );
+							} else {
+								$(this).css('display', 'none').removeClass( 'et_slide_transition' );
+							}
 
 							et_stop_video( $active_slide );
 
@@ -544,26 +568,35 @@
 			et_hash_module_param_seperator = '|';
 
 		function process_et_hashchange( hash ) {
-			if ( ( hash.indexOf( et_hash_module_seperator, 0 ) ) !== -1 ) {
-				modules = hash.split( et_hash_module_seperator );
-				for ( var i = 0; i < modules.length; i++ ) {
-					var module_params = modules[i].split( et_hash_module_param_seperator );
-					var element = module_params[0];
+			// Bail early when hash is empty
+			if (! hash.length) {
+				return;
+			}
+
+			var modules;
+			var module_params;
+			var element;
+
+			if ((hash.indexOf(et_hash_module_seperator, 0)) !== - 1) {
+				modules = hash.split(et_hash_module_seperator);
+				for (var i = 0; i < modules.length; i ++) {
+					module_params = modules[i].split(et_hash_module_param_seperator);
+					element = module_params[0];
 					module_params.shift();
-					if ( $('#' + element ).length ) {
-						$('#' + element ).trigger({
-							type: "et_hashchange",
+					if (element.length && $('#' + element).length) {
+						$('#' + element).trigger({
+							type:   "et_hashchange",
 							params: module_params
 						});
 					}
 				}
 			} else {
-				module_params = hash.split( et_hash_module_param_seperator );
-				var element = module_params[0];
+				module_params = hash.split(et_hash_module_param_seperator);
+				element = module_params[0];
 				module_params.shift();
-				if ( $('#' + element ).length ) {
-					$('#' + element ).trigger({
-						type: "et_hashchange",
+				if (element.length && $('#' + element).length) {
+					$('#' + element).trigger({
+						type:   "et_hashchange",
 						params: module_params
 					});
 				}
@@ -677,25 +710,21 @@
 			}
 
 			function set_carousel_columns( $the_carousel ) {
-				var columns,
-					$carousel_parent = $the_carousel.parents('.et_pb_column'),
-					carousel_items_width = $carousel_items.width(),
-					carousel_item_count = $the_carousel_items.length;
+				var columns = 3;
+				var $carousel_parent = $the_carousel.parents('.et_pb_column:not(".et_pb_specialty_column")');
 
-				if ( $carousel_parent.hasClass('et_pb_column_4_4') || $carousel_parent.hasClass('et_pb_column_3_4') || $carousel_parent.hasClass('et_pb_column_2_3') ) {
-					if ( $et_window.width() < 768 ) {
-						columns = 3;
-					} else {
+				if ($carousel_parent.hasClass('et_pb_column_4_4') || $carousel_parent.hasClass('et_pb_column_3_4') || $carousel_parent.hasClass('et_pb_column_2_3')) {
+					if ($et_window.width() >= 768) {
 						columns = 4;
 					}
-				} else if ( $carousel_parent.hasClass('et_pb_column_1_2') || $carousel_parent.hasClass('et_pb_column_3_8') || $carousel_parent.hasClass('et_pb_column_1_3') ) {
-					columns = 3;
-				} else if ( $carousel_parent.hasClass('et_pb_column_1_4') ) {
-					if ( $et_window.width() > 480 && $et_window.width() < 980 ) {
-						columns = 3;
-					} else {
+				} else if ($carousel_parent.hasClass('et_pb_column_1_4')) {
+					if ($et_window.width() <= 480 && $et_window.width() >= 980) {
 						columns = 2;
 					}
+				} else if ($carousel_parent.hasClass('et_pb_column_3_5')) {
+					columns = 4;
+				} else if ($carousel_parent.hasClass('et_pb_column_1_5') || $carousel_parent.hasClass('et_pb_column_1_6')) {
+					columns = 2;
 				}
 
 				if ( columns === $carousel_items.data('portfolio-columns') ) {
@@ -2685,7 +2714,8 @@
 
 			window.et_parallax_set_height = function() {
 				var $this = $(this);
-				var parallaxHeight = window.top && $this.parent('.et_pb_fullscreen').length ? $et_top_window.height() : $this.innerHeight();
+				var isFullscreen = isBuilder && $this.parent('.et_pb_fullscreen').length;
+				var parallaxHeight = isFullscreen && $et_top_window.height() > $this.innerHeight() ? $et_top_window.height() : $this.innerHeight();
 				var bg_height = ( $et_top_window.height() * 0.3 + parallaxHeight );
 
 				// Add BFB metabox to top window offset on parallax image height to avoid parallax displays its
@@ -2722,7 +2752,7 @@
 					return;
 				}
 
-				var topWindow = window.top || window;
+				var topWindow = isBuilder ? window.top : window;
 				var backgroundOffset = isBFB ? topWindow.jQuery('#et_pb_layout .inside').offset().top : 0;
 				var heightMultiplier = isBuilderModeZoom() ? 2 : 1;
 				var parentOffset = $this_parent.offset();
@@ -4332,6 +4362,13 @@
 					'opacity'                   : '',
 					'transform'                 : ''
 				});
+
+				// Prevent animation module with no explicit position property to be incorrectly positioned
+				// after animation is clomplete and animation classname is removed because animation classname has
+				// animation-name property which gives pseudo correct z-index.
+				if ('static' === $element.css('position')) {
+					$element.addClass('et_had_animation');
+				}
 			}
 
 			function et_remove_animation_data( $element ) {
@@ -4356,11 +4393,11 @@
 						$et_pb_video_background = $( '.et_pb_section_video_bg video' );
 
 				// if waypoint is available and we are not ignoring them.
-				if ( $.fn.waypoint && 'yes' !== et_pb_custom.ignore_waypoints ) {
+				if ( $.fn.waypoint && 'yes' !== et_pb_custom.ignore_waypoints && !is_frontend_builder ) {
 					et_process_animation_data( true );
 
 					// get all of our waypoint things.
-					var modules = $( '.et_pb_counter_container, .et-waypoint' );
+					var modules = $( '.et-waypoint' );
 					modules.each(function(){
 						et_waypoint( $(this), {
 							offset: et_get_offset( $(this), '100%' ),
@@ -4439,7 +4476,9 @@
 					// if no waypoints supported then apply all the animations right away
 					et_process_animation_data( false );
 
-					$( '.et_pb_counter_container, .et-waypoint' ).addClass( 'et-animated' );
+					var animated_class = is_frontend_builder ? 'et-animated--vb' : 'et-animated';
+
+					$('.et-waypoint').addClass(animated_class);
 
 					if ( $et_pb_circle_counter.length ) {
 						$et_pb_circle_counter.each(function() {
@@ -4449,7 +4488,7 @@
 								return;
 							}
 
-							if ( $this_counter.data( 'PieChartHasLoaded' ) ) {
+							if ($this_counter.data('PieChartHasLoaded') || typeof $this_counter.data('easyPieChart') === 'undefined') {
 								return;
 							}
 
@@ -4753,8 +4792,9 @@
 
 			window.et_calc_fullscreen_section = function(event, section) {
 				var isResizing = typeof event === 'object' && event.type === 'resize',
-					topWindow = window.top || window,
+					topWindow = isBuilder ? window.top : window,
 					$et_window = $(topWindow),
+					$appWindow = $(window),
 					$this_section = section || $(this),
 					section_index = $this_section.index('.et_pb_fullscreen'),
 					timeout = isResizing && typeof fullscreen_section_width[section_index] !== 'undefined' && event.target.window_width > fullscreen_section_width[section_index] ? 800 : 0;
@@ -4930,31 +4970,28 @@
 						$header_image.css('align-self', 'flex-end');
 					}
 
-					// Mobile device and small screen handler
-					if ((et_is_mobile_device && !et_is_ipad) || $et_window.width() < 768){
-						// Detect if section height is lower than the content height
-						var headerContentHeight = 0;
-						if ($header_content.length) {
-							headerContentHeight += $header_content.outerHeight();
-						}
-						if ($header_image.length) {
-							headerContentHeight += $header_image.outerHeight();
-						}
-						if (headerContentHeight > sectionHeight ) {
-							$this_section.css('min-height', headerContentHeight + 'px');
-							$header.css('min-height', headerContentHeight + 'px');
-						}
+					// Detect if section height is lower than the content height
+					var headerContentHeight = 0;
 
-						// Justify the section content
-						if ( $header_image.hasClass('bottom')) {
-							if (headerContentHeight < sectionHeight ) {
-								$this_section.css('min-height', (headerContentHeight + 80) + 'px');
-								$header.css('min-height', (headerContentHeight + 80) + 'px');
-							}
-							$header.css('justify-content', 'flex-end');
-						}
+					if ($header_content.length) {
+						headerContentHeight += $header_content.outerHeight();
+					}
+					if ($header_image.length) {
+						headerContentHeight += $header_image.outerHeight();
+					}
+					if (headerContentHeight > sectionHeight ) {
+						$this_section.css('min-height', headerContentHeight + 'px');
+						$header.css('min-height', headerContentHeight + 'px');
 					}
 
+					// Justify the section content
+					if ( $header_image.hasClass('bottom')) {
+						if (headerContentHeight < sectionHeight ) {
+							$this_section.css('min-height', (headerContentHeight + 80) + 'px');
+							$header.css('min-height', (headerContentHeight + 80) + 'px');
+						}
+						$header.css('justify-content', 'flex-end');
+					}
 				}, timeout );
 			};
 			window.et_calculate_fullscreen_section_size = function(){
@@ -4973,7 +5010,7 @@
 
 			window.et_pb_parallax_init = function($this_parallax) {
 				var $this_parent = $this_parallax.parent();
-				var topWindow = window.top || window;
+				var topWindow = isBuilder ? window.top : window;
 
 				if ($this_parallax.hasClass('et_pb_parallax_css')) {
 					// Register faux CSS Parallax effect for builder modes with top window scroll
@@ -5103,10 +5140,24 @@
 					$main_header             = $('#main-header'),
 					wpadminbar_height        = $wpadminbar.length && ! is_wp_relative_admin_bar ? $wpadminbar.height() : 0,
 					top_header_height        = !window.et_is_fixed_nav || !is_desktop_view ? 0 : $top_header.height(),
-					data_height_onload       = typeof $main_header.attr('data-height-onload') === 'undefined' ? 0 : $main_header.attr('data-height-onload');
+					data_height_onload       = typeof $main_header.attr('data-height-onload') === 'undefined' ? 0 : $main_header.attr('data-height-onload'),
 					initial_fixed_difference = $main_header.height() === et_pb_get_fixed_main_header_height() || ! is_desktop_view || ! window.et_is_fixed_nav || is_transparent_main_header || is_hide_nav ? 0 : et_pb_get_fixed_main_header_height() - parseFloat( data_height_onload ),
 					section_bottom           = ( this_section_offset.top + $this_section.outerHeight( true ) + initial_fixed_difference ) - ( wpadminbar_height + top_header_height + et_pb_get_fixed_main_header_height() ),
 					animate_modified         = false;
+
+				if (!isVB && window.et_is_fixed_nav && is_transparent_main_header) {
+					// We need to perform an extra adjustment which requires computing header height
+					// in "fixed" mode. It can't be done directly on header because it will change
+					// its appearance so an invisible clone is used instead.
+					var clone = $main_header
+						.clone()
+						.addClass('et-disabled-animations et-fixed-header')
+						.css('visibility', 'hidden')
+						.appendTo($body);
+
+					section_bottom += et_pb_get_fixed_main_header_height() - clone.height();
+					clone.remove();
+				}
 
 				if ( $this_section.length ) {
 					var fullscreen_scroll_duration = 800;
@@ -5224,13 +5275,13 @@
 				window.et_pb_ajax_pagination_cache = window.et_pb_ajax_pagination_cache || [];
 
 				// construct the selector for current module
-				$.each( module_classes, function( index, value ) {
+				$.each(module_classes, function(index, value) {
 					// skip animation classes so no wrong href is formed afterwards
-					if ( $.inArray( value, animation_classes ) !== -1 ) {
+					if ($.inArray(value, animation_classes) !== -1 || 'et_had_animation' === value) {
 						return;
 					}
 
-					if ( '' !== value.trim() ) {
+					if ('' !== value.trim()) {
 						module_class_processed += '.' + value;
 					}
 				});
@@ -5861,7 +5912,7 @@
 
 					$('<style />', {
 						'id' : 'et_fix_html_margin',
-						'text' : 'html.js { margin-top: 0px !important; }'
+						'text' : 'html.js.et-fb-top-html { margin-top: 0px !important; }'
 					}).appendTo('head');
 				}, 0);
 			}
