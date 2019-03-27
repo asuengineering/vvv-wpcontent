@@ -6,10 +6,10 @@
  * Author: Rich Tabor
  * Author URI: https://richtabor.com
  * Tags: gutenberg, editor, block, unit test, coblocks
- * Version: 1.0.5
+ * Version: 1.0.6
  * Text Domain: 'block-unit-test'
  * Domain Path: languages
- * Tested up to: 5.0.0
+ * Tested up to: 5.1
  *
  * Block Unit Test is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -72,7 +72,7 @@ class Block_Unit_Test {
 	 */
 	private function __construct() {
 
-		$this->_version = '1.0.5';
+		$this->_version = '1.0.6';
 		$this->_url     = untrailingslashit( plugins_url( '/assets/images', __FILE__ ) );
 
 		// Actions.
@@ -245,14 +245,6 @@ class Block_Unit_Test {
 			<!-- wp:heading {"level":6} -->
 			<h6>' . esc_html__( 'Heading Six', 'block-unit-test' ) . '</h6>
 			<!-- /wp:heading -->
-
-			<!-- wp:separator -->
-			<hr class="wp-block-separator" />
-			<!-- /wp:separator -->
-
-			<!-- wp:subhead -->
-			<p class="wp-block-subhead">' . esc_html__( 'This is a subhead block, where you can add a little extra blurb about your post or page. Cool yeah?', 'block-unit-test' ) . '</p>
-			<!-- /wp:subhead -->
 
 			<!-- wp:separator -->
 			<hr class="wp-block-separator" />
@@ -1284,6 +1276,20 @@ class Block_Unit_Test {
 					</li>
 				</ul>
 				<!-- /wp:gallery -->
+
+				<!-- wp:heading -->
+				<h2>Media &amp; Text</h2>
+				<!-- /wp:heading -->
+
+				<!-- wp:media-text -->
+				<div class="wp-block-media-text alignwide"><figure class="wp-block-media-text__media"></figure><div class="wp-block-media-text__content"><!-- wp:paragraph {"placeholder":"Content…","fontSize":"large"} -->
+				<p class="has-large-font-size">Large text</p>
+				<!-- /wp:paragraph -->
+
+				<!-- wp:paragraph -->
+				<p>This is part of the InnerBlocks text for the Media &amp; Text block.</p>
+				<!-- /wp:paragraph --></div></div>
+				<!-- /wp:media-text -->
 			';
 		}
 		return apply_filters( 'block_unit_test_content', $content );

@@ -4,9 +4,9 @@ Plugin URI: https://richtabor.com/gutenberg-block-unit-test/
 Contributors: richtabor, coblocks, thatplugincompany, themebeans
 Tags: blocks, gutenberg, editor, page builder, gutenberg blocks
 Requires at least: 4.7.0
-Tested up to: 5.0.0
+Tested up to: 5.1
 Requires PHP: 5.2.4
-Stable tag: 1.0.5
+Stable tag: 1.0.6
 License: GPL-3.0
 License URI: http://www.gnu.org/licenses/gpl-3.0.html
 
@@ -51,6 +51,15 @@ The Block Unit Test is a great starting point, but if you want more tips and tec
 I recently published an article covering [how to add WordPress theme styles to Gutenberg](https://richtabor.com/add-wordpress-theme-styles-to-gutenberg/?utm_medium=block-unit-test&utm_source=readme&utm_campaign=readme&utm_content=how-to-add-wordpress-theme-styling-to-gutenberg), which is a great place to start.
 
 == Changelog ==
+
+= 1.0.6, February 15, 2019 =
+* Tweak: Add Media & Text block to the unit test
+* Tweak: Update the CoBlocks unit tests to support its new blocks
+* Tweak: Remove the deprecated subhead block
+* Tweak: Add support for WordPress 5.1
+
+= 1.0.5, November 03, 2018 =
+* Tweak: Update the CoBlocks and Gutenberg unit tests
 
 = 1.0.4, August 23, 2018 =
 * Tweak: Update the CoBlocks unit test
