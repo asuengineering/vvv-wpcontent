@@ -12,10 +12,99 @@
   var $etSystemStatusTable             = $('.et_system_status');
   var $etSupportUserToggle             = $('.et_support_user_toggle .et_pb_yes_no_button');
   var $et_documentation_videos_list_li = $('.et_documentation_videos_list li');
+  var $modalSafeModeWarningTemplate    = $('#et-ajax-saving-template').html();
 
   function confirmClipboardCopy() {
     $save_message.addClass('success-animation').fadeIn('fast');
     $save_message.fadeOut('slow');
+  }
+
+  // Remote Access: Toggle ET Support User On/Off
+  function supportUserActivationToggle($toggle, newState, silentMode) {
+
+    // If Silent Mode is `true` then we'll run AJAX without rendering display changes
+    silentMode = silentMode || false;
+
+    if (typeof newState === 'undefined') {
+      return;
+    }
+
+    var postData = {
+      action: 'et_support_user_update',
+      nonce:  etSupportCenter.nonce
+    };
+
+    switch (newState) {
+      case 'activate':
+        postData.support_update = 'activate';
+        break;
+      case 'deactivate':
+        postData.support_update = 'deactivate';
+        break;
+      default:
+        return;
+    }
+
+    // Ajax toggle ET Support User
+    jQuery.ajax({
+      type:       'POST',
+      data:       postData,
+      dataType:   'json',
+      url:        etSupportCenter.ajaxURL,
+      action:     'support_user_update_via_ajax',
+      beforeSend: function(xhr) {
+        // Don't execute DOM changes in Silent Mode
+        if (silentMode) {
+          return;
+        }
+
+        $save_message.addClass('et_loading').removeClass('success-animation');
+        $save_message.fadeIn('fast');
+      },
+      success:    function(response) {
+        // Don't execute DOM changes in Silent Mode
+        if (silentMode) {
+          return;
+        }
+
+        $save_message.removeClass('et_loading').removeClass('success-animation');
+
+        setTimeout(function() {
+          $save_message.fadeOut('slow');
+        }, removeDelay);
+        var $msgExpiry = $('.et-support-user-expiry').first();
+        if ('activate' === postData.support_update) {
+          $toggle.removeClass('et_pb_off_state').addClass('et_pb_on_state');
+          $msgExpiry.attr('data-expiry', response.expiry);
+          supportUserTimeToExpiry();
+          $msgExpiry.show(showHideDelay);
+          $('.et-support-user-elevated').show(showHideDelay);
+          $('.card.et_remote_access .et_card_cta').append(
+            $('<a>')
+              .attr({
+                'class':      'copy_support_token',
+                'data-token': response.token
+              })
+              .text('Copy Support Token')
+          );
+        } else if ('deactivate' === postData.support_update) {
+          // First switch & hide the "elevated" toggle
+          // (not a click event because we don't need to trigger AJAX)
+          $('.et-support-user-elevated').hide(showHideDelay);
+          $('.et_support_user_elevated_toggle .et_pb_yes_no_button').removeClass('et_pb_on_state').addClass('et_pb_off_state');
+          // Now clean up the Remote Access toggle
+          $msgExpiry.hide(showHideDelay);
+          $toggle.removeClass('et_pb_on_state').addClass('et_pb_off_state');
+          $('.copy_support_token').fadeOut('slow');
+          setTimeout(function() {
+            $('.copy_support_token').remove();
+          }, removeDelay);
+        }
+        $save_message.addClass('success-animation');
+      }
+    }).fail(function(data) {
+      console.log(data.responseText);
+    });
   }
 
   // Remote Access: Calculate of Time To Auto-Deactivation
@@ -112,15 +201,12 @@
       url:        etSupportCenter.ajaxURL,
       action:     'safe_mode_update_via_ajax',
       beforeSend: function(xhr) {
+        $('.et-core-safe-mode-block-modal').removeClass('et-core-active');
         $save_message.addClass('et_loading').removeClass('success-animation');
         $save_message.fadeIn('fast');
       },
       success:    function(response) {
-        $save_message.removeClass('et_loading').removeClass('success-animation');
-
-        setTimeout(function() {
-          $save_message.fadeOut('slow');
-        }, removeDelay);
+        $save_message.removeClass('et_loading').addClass('success-animation');
         var $msgExpiry = $('.et-support-user-expiry').first();
         if ('activate' === postData.support_update) {
           $('.et_safe_mode_toggle .et_pb_yes_no_button').removeClass('et_pb_off_state').addClass('et_pb_on_state');
@@ -141,9 +227,8 @@
             $('.wp-admin').removeClass('et-safe-mode-active');
           }, removeDelay);
         }
-        $save_message.addClass('success-animation');
-        $('.et-core-safe-mode-block-modal').removeClass('et-core-active');
         setTimeout(function() {
+          $save_message.fadeOut('slow');
           window.location.reload(true);
         }, removeDelay);
       }
@@ -154,6 +239,7 @@
 
   // Safe Mode: Interrupt Actions when Safe Mode is Active
   function preventActionWhenSafeModeActive() {
+    $('body').append($modalSafeModeWarningTemplate);
     $('.et-core-safe-mode-block-modal').addClass('et-core-active');
     $(window).trigger('et-core-modal-active');
   }
@@ -181,7 +267,7 @@
      */
 
     // System Status: display message if all checks passed
-    if(0 === $('.et-system-status-report').children(':not(.et_system_status_pass)').length) {
+    if (0 === $('.et-system-status-report').children(':not(.et_system_status_pass)').length) {
       $('.et-system-status-congratulations').show(showHideDelay);
     }
 
@@ -207,149 +293,91 @@
     /**
      * Support Center :: Remote Access
      */
+    if ($('.card.et_remote_access').length > 0) {
+      // Remote Access: Initial Calculation of Time To Auto-Deactivation
+      supportUserTimeToExpiry();
 
-    // Remote Access: Initial Calculation of Time To Auto-Deactivation
-    supportUserTimeToExpiry();
+      // Remote Access: Recalculate Time To Auto-Deactivation (every 30 seconds)
+      setInterval(supportUserTimeToExpiry, 30000);
 
-    // Remote Access: Recalculate Time To Auto-Deactivation (every 30 seconds)
-    setInterval(supportUserTimeToExpiry, 30000);
-
-    // Remote Access: Display Auto-Deactivation Countdown
-    if ($etSupportUserToggle.hasClass('et_pb_on_state')) {
-      $('.et-support-user-expiry').first().show(0);
-    }
-
-    // Remote Access: Activate/Deactivate
-    $etSupportUserToggle.on('click', function(e) {
-
-      e.preventDefault();
-
-      var $toggle = $(this);
-
-      var postData = {
-        action: 'et_support_user_update',
-        nonce:  etSupportCenter.nonce
-      };
-
-      if ($toggle.hasClass('et_pb_off_state')) {
-        postData.support_update = 'activate';
-      } else if ($toggle.hasClass('et_pb_on_state')) {
-        postData.support_update = 'deactivate';
+      // Remote Access: Display Auto-Deactivation Countdown
+      if ($etSupportUserToggle.hasClass('et_pb_on_state')) {
+        $('.et-support-user-expiry').first().show(0);
       } else {
-        return;
+        // If the Support User account toggle is off, send a quick AJAX request to verify the account is deactivated
+        supportUserActivationToggle($etSupportUserToggle, 'deactivate', true);
       }
 
-      // Ajax toggle ET Support User
-      jQuery.ajax({
-        type:       'POST',
-        data:       postData,
-        dataType:   'json',
-        url:        etSupportCenter.ajaxURL,
-        action:     'support_user_update_via_ajax',
-        beforeSend: function(xhr) {
-          $save_message.addClass('et_loading').removeClass('success-animation');
-          $save_message.fadeIn('fast');
-        },
-        success:    function(response) {
-          $save_message.removeClass('et_loading').removeClass('success-animation');
+      // Remote Access: Activate/Deactivate
+      $etSupportUserToggle.on('click', function(e) {
+        e.preventDefault();
 
-          setTimeout(function() {
-            $save_message.fadeOut('slow');
-          }, removeDelay);
-          var $msgExpiry = $('.et-support-user-expiry').first();
-          if ('activate' === postData.support_update) {
-            $toggle.removeClass('et_pb_off_state').addClass('et_pb_on_state');
-            $msgExpiry.attr('data-expiry', response.expiry);
-            supportUserTimeToExpiry();
-            $msgExpiry.show(showHideDelay);
-            $('.et-support-user-elevated').show(showHideDelay);
-            $('.card.et_remote_access .et_card_cta').append(
-              $('<a>')
-                .attr({
-                  'class':      'copy_support_token',
-                  'data-token': response.token
-                })
-                .text('Copy Support Token')
-            );
-          } else if ('deactivate' === postData.support_update) {
-            // First switch & hide the "elevated" toggle
-            // (not a click event because we don't need to trigger AJAX)
-            $('.et-support-user-elevated').hide(showHideDelay);
-            $('.et_support_user_elevated_toggle .et_pb_yes_no_button').removeClass('et_pb_on_state').addClass('et_pb_off_state');
-            // Now clean up the Remote Access toggle
-            $msgExpiry.hide(showHideDelay);
-            $toggle.removeClass('et_pb_on_state').addClass('et_pb_off_state');
-            $('.copy_support_token').fadeOut('slow');
+        if ($etSupportUserToggle.hasClass('et_pb_off_state')) {
+          supportUserActivationToggle($(this), 'activate');
+        } else if ($etSupportUserToggle.hasClass('et_pb_on_state')) {
+          supportUserActivationToggle($(this), 'deactivate');
+        }
+      });
+
+      // Remote Access: Elevate/Reset Divi Support user role
+      $('.et_support_user_elevated_toggle .et_pb_yes_no_button').on('click', function(e) {
+        e.preventDefault();
+
+        var $toggle = $(this);
+
+        var postData = {
+          action: 'et_support_user_update',
+          nonce:  etSupportCenter.nonce
+        };
+
+        if ($toggle.hasClass('et_pb_off_state')) {
+          postData.support_update = 'elevate';
+        } else if ($toggle.hasClass('et_pb_on_state')) {
+          postData.support_update = 'activate';
+        } else {
+          return;
+        }
+
+        // Ajax toggle ET Support User Admin Mode
+        jQuery.ajax({
+          type:       'POST',
+          data:       postData,
+          dataType:   'json',
+          url:        etSupportCenter.ajaxURL,
+          action:     'support_user_update_via_ajax',
+          beforeSend: function(xhr) {
+            $save_message.addClass('et_loading').removeClass('success-animation');
+            $save_message.fadeIn('fast');
+          },
+          success:    function(response) {
+            $save_message.removeClass('et_loading').removeClass('success-animation');
+
             setTimeout(function() {
-              $('.copy_support_token').remove();
+              $save_message.fadeOut('slow');
             }, removeDelay);
+            if ('elevate' === postData.support_update) {
+              $toggle.removeClass('et_pb_off_state').addClass('et_pb_on_state');
+            } else if ('activate' === postData.support_update) {
+              $toggle.removeClass('et_pb_on_state').addClass('et_pb_off_state');
+            }
+            $save_message.addClass('success-animation');
           }
-          $save_message.addClass('success-animation');
-        }
-      }).fail(function(data) {
-        console.log(data.responseText);
+        }).fail(function(data) {
+          console.log(data.responseText);
+        });
       });
 
-    });
-
-    // Remote Access: Elevate/Reset Divi Support user role
-    $('.et_support_user_elevated_toggle .et_pb_yes_no_button').on('click', function(e) {
-      e.preventDefault();
-
-      var $toggle = $(this);
-
-      var postData = {
-        action: 'et_support_user_update',
-        nonce:  etSupportCenter.nonce
-      };
-
-      if ($toggle.hasClass('et_pb_off_state')) {
-        postData.support_update = 'elevate';
-      } else if ($toggle.hasClass('et_pb_on_state')) {
-        postData.support_update = 'activate';
-      } else {
-        return;
-      }
-
-      // Ajax toggle ET Support User Admin Mode
-      jQuery.ajax({
-        type:       'POST',
-        data:       postData,
-        dataType:   'json',
-        url:        etSupportCenter.ajaxURL,
-        action:     'support_user_update_via_ajax',
-        beforeSend: function(xhr) {
-          $save_message.addClass('et_loading').removeClass('success-animation');
-          $save_message.fadeIn('fast');
-        },
-        success:    function(response) {
-          $save_message.removeClass('et_loading').removeClass('success-animation');
-
-          setTimeout(function() {
-            $save_message.fadeOut('slow');
-          }, removeDelay);
-          if ('elevate' === postData.support_update) {
-            $toggle.removeClass('et_pb_off_state').addClass('et_pb_on_state');
-          } else if ('activate' === postData.support_update) {
-            $toggle.removeClass('et_pb_on_state').addClass('et_pb_off_state');
-          }
-          $save_message.addClass('success-animation');
-        }
-      }).fail(function(data) {
-        console.log(data.responseText);
+      // Remote Access: Copy Support Token to clipboard
+      $('body').on('click', '.copy_support_token', function() {
+        var token = $(this).attr('data-token');
+        var $temp = $('<input>');
+        $('body').append($temp);
+        $temp.val(token).select();
+        document.execCommand('copy');
+        $temp.remove();
+        confirmClipboardCopy();
       });
-    });
-
-    // Remote Access: Copy Support Token to clipboard
-    $('body').on('click', '.copy_support_token', function() {
-      var token = $(this).attr('data-token');
-      var $temp = $('<input>');
-      $('body').append($temp);
-      $temp.val(token).select();
-      document.execCommand('copy');
-      $temp.remove();
-      confirmClipboardCopy();
-    });
+    }
 
     /**
      * Support Center :: Documentation & Help
@@ -376,6 +404,15 @@
     /**
      * Support Center :: Safe Mode
      */
+
+    if ($save_message.length === 0) {
+      $('body.wp-admin').append(
+        $('<div>').attr({ 'id': 'et-ajax-saving', 'class': 'et_loading' }).append(
+          $('<img>').attr({ 'src': etSupportCenter.ajaxLoaderImg, 'alt': 'loading', 'id': 'loading' })
+        )
+      );
+      $save_message = $('#et-ajax-saving');
+    }
 
     // Safe Mode: Activate/Deactivate
     $('body').on('click', '.et-safe-mode-indicator', function(e) {
@@ -410,6 +447,12 @@
     $('body.et-safe-mode-active.plugins-php').on('click', '.page-title-action', function(e) {
       e.preventDefault();
       preventActionWhenSafeModeActive();
+    });
+
+    // Safe Mode: Close Interrupt
+    $('body').on('click', '>.et-core-safe-mode-block-modal .et-core-modal-close', function(e) {
+      e.preventDefault();
+      $('body>.et-core-safe-mode-block-modal').remove();
     });
 
     /**

@@ -3,6 +3,12 @@
 // Register assets that need to be fired at head
 function et_fb_enqueue_assets_head() {
 	// Setup WP media.
+	// Around 5.2-alpha, `wp_enqueue_media` started using a function defined in a file
+	// which is only included in admin. Unfortunately there's no safe/reliable way to conditionally
+	// load this other than checking the WP version.
+	if ( version_compare( $GLOBALS['wp_version'], '5.2-alpha-44947', '>=' ) ) {
+		require_once( ABSPATH . 'wp-admin/includes/post.php' );
+	}
 	wp_enqueue_media();
 
 	// Setup Builder Media Library

@@ -761,9 +761,16 @@ function et_divi_customize_register( $wp_customize ) {
 
 	et_builder_init_global_settings();
 
+	// Determine if current request is Design Preview Link. Design Preview Link was added on
+	// WordPress 4.9 and enables user to share customizer change without the need to publish the
+	// customizer change first: save customizer change as draft, copy the link, and share it with
+	// collaborator. Design Preview Link works on non-logged in user
+	// @see https://codex.wordpress.org/Version_4.9
+	$is_customizer_public_shared_link = ! is_admin() && is_customize_preview() && ! $wp_customize->get_messenger_channel();
+
 	if ( isset( $customizer_option_set ) && 'module' === $customizer_option_set ) {
 		// display wp error screen if module customizer disabled for current user
-		if ( ! et_pb_is_allowed( 'module_customizer' ) ) {
+		if ( ! et_pb_is_allowed( 'module_customizer' ) && ! $is_customizer_public_shared_link ) {
 			wp_die( esc_html__( "you don't have sufficient permissions to access this page", 'Divi' ) );
 		}
 
@@ -775,7 +782,7 @@ function et_divi_customize_register( $wp_customize ) {
 		et_divi_customizer_module_settings( $wp_customize );
 	} else {
 		// display wp error screen if theme customizer disabled for current user
-		if ( ! et_pb_is_allowed( 'theme_customizer' ) ) {
+		if ( ! et_pb_is_allowed( 'theme_customizer' ) && ! $is_customizer_public_shared_link ) {
 			wp_die( esc_html__( "you don't have sufficient permissions to access this page", 'Divi' ) );
 		}
 
@@ -6059,6 +6066,11 @@ function et_divi_add_customizer_css() {
 			return;
 		}
 
+		/** @see ET_Support_Center::toggle_safe_mode */
+		if ( et_core_is_safe_mode_active() ) {
+			return;
+		}
+
 		$post_id     = et_core_page_resource_get_the_ID();
 		$is_preview  = is_preview() || isset( $_GET['et_pb_preview_nonce'] ) || is_customize_preview();
 		$is_singular = et_core_page_resource_is_singular();
@@ -7438,7 +7450,12 @@ function et_divi_add_customizer_css() {
 		/* ====================================================
 		 * --------->>> BEGIN MODULE CUSTOMIZER CSS <<<--------
 		 * ==================================================== */
-		ob_start();
+		// Module customizer should only be printed if current page uses builder to avoid module
+		// customizer styling being cached on `et-divi-customizer-global-*css` file which is only
+		// served on non-builder page
+		if ( et_core_is_builder_used_on_current_request() ) {
+
+			ob_start();
 
 			/* Gallery */
 			et_pb_print_module_styles_css( 'et_pb_gallery', array(
@@ -8169,9 +8186,10 @@ function et_divi_add_customizer_css() {
 			 * @param string $module_customizer_css
 			 */
 			$css_output[] = apply_filters( 'et_divi_module_customizer_css_output', ob_get_clean() );
+		}
 
-			// Give the output to the style manager so a static resource can be created and served.
-			$styles_manager->set_data( implode( '\n', $css_output ) );
+		// Give the output to the style manager so a static resource can be created and served.
+		$styles_manager->set_data( implode( '\n', $css_output ) );
 }
 add_action( 'wp', 'et_divi_add_customizer_css' );
 
@@ -9083,9 +9101,9 @@ if ( ! function_exists( 'et_divi_get_top_nav_items' ) ) {
 	function et_divi_get_top_nav_items() {
 		$items = new stdClass;
 
-		$items->phone_number = et_get_option( 'phone_number' );
+		$items->phone_number = trim( et_get_option( 'phone_number' ) );
 
-		$items->email = et_get_option( 'header_email' );
+		$items->email = trim( et_get_option( 'header_email' ) );
 
 		$items->contact_info_defined = $items->phone_number || $items->email;
 
@@ -9292,7 +9310,7 @@ function et_divi_output_content_wrapper_end() {
 }
 
 function et_add_divi_menu() {
-	$core_page = add_menu_page( 'Divi', 'Divi', 'switch_themes', 'et_divi_options', 'et_build_epanel' );
+	$core_page = add_menu_page( 'Divi', 'Divi', 'edit_theme_options', 'et_divi_options', 'et_build_epanel' );
 
 	// Add Theme Options menu only if it's enabled for current user
 	if ( et_pb_is_allowed( 'theme_options' ) ) {

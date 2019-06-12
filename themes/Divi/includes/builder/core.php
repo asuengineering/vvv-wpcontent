@@ -1,6 +1,6 @@
 <?php
 
-define( 'ET_BUILDER_ENABLE_BFB_OPTIN_MODAL', false );
+define( 'ET_BUILDER_ENABLE_BFB_OPTIN_MODAL', true );
 
 
 if ( ! function_exists( 'et_builder_add_filters' ) ):
@@ -45,7 +45,7 @@ function et_builder_should_load_framework() {
 	$required_admin_pages = array( 'edit.php', 'post.php', 'post-new.php', 'admin.php', 'customize.php', 'edit-tags.php', 'admin-ajax.php', 'export.php', 'options-permalink.php', 'themes.php', 'revision.php' ); // list of admin pages where we need to load builder files
 	$specific_filter_pages = array( 'edit.php', 'post.php', 'post-new.php', 'admin.php', 'edit-tags.php' ); // list of admin pages where we need more specific filtering
 	$post_id = (int) et_()->array_get( $_GET, 'post', 0 );
-	
+
 	$bfb_settings = get_option( 'et_bfb_settings' );
 	$is_bfb = et_pb_is_allowed( 'use_visual_builder' ) && isset( $bfb_settings['enable_bfb'] ) && 'on' === $bfb_settings['enable_bfb'];
 	$is_bfb_used = 'on' === get_post_meta( $post_id, '_et_pb_use_builder', true ) && $is_bfb;
@@ -324,10 +324,12 @@ function et_builder_get_third_party_unqueryable_post_types() {
  * @return array
  */
 function et_get_registered_post_type_options( $usort = false ) {
-	static $post_type_options = null;
 
-	if ( ! is_null( $post_type_options ) ) {
-		return $post_type_options;
+	// Cache key
+	$key = 'et_get_registered_post_type_options';
+
+	if ( ET_Core_Cache::has( $key ) ) {
+		return ET_Core_Cache::get( $key );
 	}
 
 	$blacklist      = et_builder_get_blacklisted_post_types();
@@ -360,8 +362,23 @@ function et_get_registered_post_type_options( $usort = false ) {
 		wp_list_pluck( $post_types, 'label' )
 	);
 
+	ET_Core_Cache::add( $key, $post_type_options );
+
 	return $post_type_options;
 }
+
+/**
+ * Clear post type options cache whenever a custom post type is registered.
+ *
+ * @since 3.21.2
+ *
+ * @return void
+ */
+function et_clear_registered_post_type_options_cache() {
+	ET_Core_Cache::delete( 'et_get_registered_post_type_options' );
+}
+
+add_action( 'registered_post_type', 'et_clear_registered_post_type_options_cache');
 
 /**
  * Get the list of unsupported Post Types.
@@ -2064,6 +2081,7 @@ function et_fb_get_nonces() {
 		'resolvePostContent'            => wp_create_nonce( 'et_fb_resolve_post_content' ),
 		'getPostTypes'                  => wp_create_nonce( 'et_fb_get_post_types' ),
 		'getPostsList'                  => wp_create_nonce( 'et_fb_get_posts_list' ),
+		'sendErrorReport'               => wp_create_nonce( 'et_fb_send_error_report' ),
 	);
 
 	return array_merge( $nonces, $fb_nonces );
@@ -4585,12 +4603,28 @@ function et_fb_prepare_ssl_link( $link ) {
  * @return string.
  */
 if ( ! function_exists( 'et_fb_get_builder_url' ) ) :
-	function et_fb_get_builder_url( $url = false, $builder = 'vb' ) {
+	function et_fb_get_builder_url( $url = false, $builder = 'vb', $is_new_page = false, $custom_page_id = false ) {
 		$args = array(
 			'et_fb'     => '1',
 			'et_bfb'    => 'bfb' === $builder ? '1' : false,
 			'PageSpeed' => 'off',
 		);
+
+		if ('bfb' === $builder && $is_new_page) {
+			global $post;
+
+			$duplicate_options  = get_user_meta( get_current_user_id(), 'pll_duplicate_content', true );
+			$duplicate_content  = ! empty( $duplicate_options ) && ! empty( $duplicate_options[ $post->post_type ] );
+			$duplicate_fallback = (int) $custom_page_id === (int) get_option( 'page_for_posts' ) ? (int) $custom_page_id : 'empty';
+			$from_post_id       = isset( $_GET['from_post'] ) ? (int) sanitize_text_field( $_GET['from_post'] ) : false;
+
+			$args['from_post']   = $duplicate_content && $from_post_id ? $from_post_id : $duplicate_fallback;
+			$args['is_new_page'] = '1';
+
+			if ( $custom_page_id ) {
+				$args['custom_page_id'] = $custom_page_id;
+			}
+		}
 
 		// Additional info need to be appended via query strings if current request is used to get
 		// BFB URL and the given page's custom post type has its publicly_queryable setting is set
@@ -4640,8 +4674,8 @@ endif;
  * @return string.
  */
 if ( ! function_exists( 'et_fb_get_bfb_url' ) ) :
-	function et_fb_get_bfb_url( $url = false ) {
-		return et_fb_get_builder_url( $url, 'bfb' );
+	function et_fb_get_bfb_url( $url = false, $is_new_page = false, $custom_page_id = false ) {
+		return et_fb_get_builder_url( $url, 'bfb', $is_new_page, $custom_page_id );
 	}
 endif;
 
@@ -4950,7 +4984,7 @@ if ( ! function_exists( 'et_builder_filter_show_bfb_optin_modal') ):
  *
  * @return bool
  */
-function et_builder_filter_show_bfb_optin_modal( $default ) {
+function et_builder_filter_show_bfb_optin_modal( $default = true ) {
 	global $shortname;
 
 	// Only admin users should see the modal
@@ -4961,7 +4995,7 @@ function et_builder_filter_show_bfb_optin_modal( $default ) {
 	$shown = et_get_option( $shortname . '_bfb_optin_modal_shown', 'unset' );
 
 	// $shown === 'no' - modal is queued to be shown, but has not had the chance yet.
-	return 'unset' === $shown ? $default : $shown === 'no';
+	return 'unset' === $shown ? (bool) $default : $shown === 'no';
 }
 endif;
 
@@ -5017,8 +5051,13 @@ function et_builder_show_bfb_optin_modal() {
 	if ( 'post.php' !== $pagenow ) {
 		return;
 	}
+	
+	// Exit if no pagebuilder enabled or BFB activated already.
+	if ( ! et_pb_is_pagebuilder_used() || et_builder_bfb_enabled() ) {
+		return;
+	}
 
-	if ( apply_filters( 'et_builder_show_bfb_optin_modal', false ) === false ) {
+	if ( false === apply_filters( 'et_builder_show_bfb_optin_modal', true ) ) {
 		return;
 	}
 
@@ -5038,9 +5077,8 @@ function et_builder_show_bfb_optin_modal() {
 			</div>
 
 			<div class="et-core-modal-content">
-				<p><?php esc_html_e( 'A new and improved Divi Builder experience is now available. This new experience brings various interface enchancements as well as visual editing capabilities to the back end. You can try the new experience today, or you can continue using the classic builder for a limited time. Once the new experience has been activated, you can still switch back to the classic editor at any time - no worries!', 'et_builder' ); ?></p>
-				<?php // TODO add link to docs ?>
-				<p><a href="#" target="_blank"><?php esc_html_e( 'Learn more about the new experience here.', 'et_builder' ); ?></a></p>
+				<p><?php esc_html_e( 'A new and improved Divi Builder experience is now available. This new experience brings various interface enhancements as well as visual editing capabilities to the back end. You can try the new experience today, or you can continue using the classic builder for now. Once the new experience has been activated, you can still switch back to the classic editor at any time.', 'et_builder' ); ?></p>
+				<p><a href="https://www.elegantthemes.com/blog/theme-releases/introducing-the-new-divi-builder-experience" target="_blank"><?php esc_html_e( 'Learn more about the new experience here.', 'et_builder' ); ?></a></p>
 			</div>
 
 			<div class="et_pb_prompt_buttons">
@@ -5081,7 +5119,7 @@ function et_builder_show_bfb_welcome_modal() {
 			</div>
 
 			<div class="et-core-modal-content">
-				<p><?php esc_html_e( 'You are now using the new Divi Builder experience! This new version of the builder comes with a lot of great interface enhancements that were previously only available in the Visual Builder. If you run into problems, you can always switch back to the classic builder using the button at the top of the page.', 'et_builder' ); ?></p>
+				<p><?php esc_html_e( 'You are now using the new Divi Builder experience! This new version of the builder comes with a lot of great interface enhancements that were previously only available in the Visual Builder. If you run into problems, you can always switch back to the classic builder using the button at the bottom of the page.', 'et_builder' ); ?></p>
 			</div>
 
 			<div class="et_pb_prompt_buttons">
@@ -5099,7 +5137,7 @@ function et_builder_show_bfb_welcome_modal() {
 endif;
 add_action( 'admin_footer', 'et_builder_show_bfb_welcome_modal' );
 
-if ( ! function_exists( 'et_builder_maybe_queue_bfb_optin_modal') ):
+if ( ! function_exists( 'et_builder_prepare_bfb') ):
 /**
  * Maybe queue BFB opt-in modal.
  *
@@ -5176,12 +5214,14 @@ add_filter( 'et_builder_inner_content_class', 'et_builder_add_builder_inner_cont
  * @return string
  */
 function et_builder_add_builder_content_wrapper( $content ) {
-	if ( ! et_pb_is_pagebuilder_used( get_the_ID() ) && ! is_et_pb_preview() ) {
+	$is_bfb_new_page = isset( $_GET['is_new_page'] ) && '1' === $_GET['is_new_page'];
+
+	if ( ! et_pb_is_pagebuilder_used( get_the_ID() ) && ! is_et_pb_preview() && ! $is_bfb_new_page ) {
 		return $content;
 	}
 
 	// Divi builder layout should only be used in singular template
-	if ( ! is_singular() ) {
+	if ( ! is_singular() && ! $is_bfb_new_page ) {
 		return $content;
 	}
 

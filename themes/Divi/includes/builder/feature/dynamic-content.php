@@ -927,11 +927,14 @@ function et_builder_parse_dynamic_content_json( $json ) {
  * @return ET_Builder_Value
  */
 function et_builder_parse_dynamic_content( $content ) {
-	$json = et_builder_clean_dynamic_content( $content );
-	$json = preg_replace( '/^@ET-DC@(.*?)@$/', '$1', $json );
-	$json = base64_decode( $json );
-
+	$json            = et_builder_clean_dynamic_content( $content );
+	$json            = preg_replace( '/^@ET-DC@(.*?)@$/', '$1', $json );
 	$dynamic_content = et_builder_parse_dynamic_content_json( $json );
+
+	if ( null === $dynamic_content ) {
+		$json            = base64_decode( $json );
+		$dynamic_content = et_builder_parse_dynamic_content_json( $json );
+	}
 
 	if ( null === $dynamic_content ) {
 		return new ET_Builder_Value( false, wp_kses_post( $content ), array() );

@@ -1,4 +1,4 @@
 <?php
 
 // Note, this will be updated automatically during grunt release task
-$ET_CORE_VERSION = '3.21';
+$ET_CORE_VERSION = '3.23.3';

@@ -1,8 +1,10 @@
 <?php
 
+require_once 'module/helpers/Overflow.php';
+
 if ( ! defined( 'ET_BUILDER_PRODUCT_VERSION' ) ) {
 	// Note, this will be updated automatically during grunt release task.
-	define( 'ET_BUILDER_PRODUCT_VERSION', '3.21' );
+	define( 'ET_BUILDER_PRODUCT_VERSION', '3.23.3' );
 }
 
 if ( ! defined( 'ET_BUILDER_VERSION' ) ) {
@@ -1830,6 +1832,18 @@ endif;
  */
 function et_builder_get_acceptable_css_string_values( $property = 'all' ) {
 	$acceptable_strings = apply_filters( 'et_builder_acceptable_css_string_values', array(
+		'width' => array(
+			'auto',
+			'inherit',
+			'initial',
+			'unset',
+		),
+		'max-width' => array(
+			'none',
+			'inherit',
+			'initial',
+			'unset',
+		),
 		'margin' => array(
 			'auto',
 			'inherit',
@@ -1837,6 +1851,24 @@ function et_builder_get_acceptable_css_string_values( $property = 'all' ) {
 			'unset',
 		),
 		'padding' => array(
+			'inherit',
+			'initial',
+			'unset',
+		),
+		'height' => array(
+			'auto',
+			'inherit',
+			'initial',
+			'unset',
+		),
+		'min-height' => array(
+			'auto',
+			'inherit',
+			'initial',
+			'unset',
+		),
+		'max-height' => array(
+			'none',
 			'inherit',
 			'initial',
 			'unset',
@@ -2014,6 +2046,78 @@ function et_builder_set_element_font_style( $property, $default, $value, $proper
 
 	return $style;
 }
+endif;
+
+if ( ! function_exists( 'et_builder_set_reset_font_style' ) ) :
+	/**
+	 * Set reset CSS style declaration to normalize the existing font styles value from another font
+	 * options group.
+	 *
+	 * @since 3.23
+	 *
+	 * @param  string  $current_value  Current font option value.
+	 * @param  string  $compared_value Compared or parent font option value.
+	 * @param  boolean $use_important  Imporant status.
+	 * @return string                  Generated reset font styles.
+	 */
+	function et_builder_set_reset_font_style( $current_value, $compared_value, $use_important = false ) {
+		// Being save, ensure current and compared values are valid string.
+		if ( ! is_string( $current_value ) || ! is_string( $compared_value ) ) {
+			return '';
+		}
+
+		$current_pieces  = explode( '|', $current_value );
+		$compared_pieces = explode( '|', $compared_value );
+		 if ( empty( $current_pieces ) || empty( $compared_pieces ) ) {
+			return '';
+		}
+
+		// Current value font style status.
+		$is_current_italic       = isset( $current_pieces[2] ) && $current_pieces[2] === 'on';
+		$is_current_uppercase    = isset( $current_pieces[3] ) && $current_pieces[3] === 'on';
+		$is_current_underline    = isset( $current_pieces[4] ) && $current_pieces[4] === 'on';
+		$is_current_small_caps   = isset( $current_pieces[5] ) && $current_pieces[5] === 'on';
+		$is_current_line_through = isset( $current_pieces[6] ) && $current_pieces[6] === 'on';
+
+		// Compated value font style status.
+		$is_compared_italic       = isset( $compared_pieces[2] ) && $compared_pieces[2] === 'on';
+		$is_compared_uppercase    = isset( $compared_pieces[3] ) && $compared_pieces[3] === 'on';
+		$is_compared_underline    = isset( $compared_pieces[4] ) && $compared_pieces[4] === 'on';
+		$is_compared_small_caps   = isset( $compared_pieces[5] ) && $compared_pieces[5] === 'on';
+		$is_compared_line_through = isset( $compared_pieces[6] ) && $compared_pieces[6] === 'on';
+
+		$style     = '';
+		$important = $use_important ? ' !important' : '';
+
+		// Reset italic.
+		if ( ! $is_current_italic && $is_compared_italic ) {
+			$style .= "font-style: normal{$important};";
+		}
+
+		// Reset uppercase.
+		if ( ! $is_current_uppercase && $is_compared_uppercase ) {
+			$style .= "text-transform: none{$important};";
+		}
+
+		// Reset small caps.
+		if ( ! $is_current_small_caps && $is_compared_small_caps ) {
+			$style .= "font-variant: none{$important};";
+		}
+
+		// Reset underline.
+		if ( ! $is_current_underline && $is_compared_underline ) {
+			$underline_value = $is_current_line_through || $is_compared_line_through ? 'line-through' : 'none';
+			$style .= "text-decoration: {$underline_value}{$important};";
+		}
+
+		// Reset line through.
+		if ( ! $is_current_line_through && $is_compared_line_through ) {
+			$line_through_value = $is_current_underline || $is_compared_underline ? 'underline' : 'none';
+			$style .= "text-decoration: {$line_through_value}{$important};";
+		}
+
+		return $style;
+	}
 endif;
 
 if ( ! function_exists( 'et_builder_get_element_style_css' ) ) :
@@ -2349,6 +2453,7 @@ add_action( 'wp_enqueue_scripts', 'et_builder_preprint_font' );
 
 if ( ! function_exists( 'et_pb_get_page_custom_css' ) ) :
 function et_pb_get_page_custom_css() {
+	$overflow         = et_pb_overflow();
 	$page_id          = apply_filters( 'et_pb_page_id_custom_css', get_the_ID() );
 	$exclude_defaults = true;
 	$page_settings    = ET_Builder_Settings::get_values( 'page', $page_id, $exclude_defaults );
@@ -2389,6 +2494,25 @@ function et_pb_get_page_custom_css() {
 		$output .= sprintf(
 			'%2$s .et_pb_section { background-color: %1$s; }',
 			esc_html( $page_settings['et_pb_section_background_color'] ),
+			esc_html( $selector_prefix )
+		);
+	}
+
+	$overflow_x = $overflow->get_value_x( $page_settings, '', 'et_pb_' );
+	$overflow_y = $overflow->get_value_y( $page_settings, '', 'et_pb_' );
+
+	if ( ! empty( $overflow_x ) ) {
+		$output .= sprintf(
+			'%2$s .et_builder_inner_content { overflow-x: %1$s; }',
+			esc_html( $overflow_x ),
+			esc_html( $selector_prefix )
+		);
+	}
+
+	if ( ! empty( $overflow_y ) ) {
+		$output .= sprintf(
+			'%2$s .et_builder_inner_content { overflow-y: %1$s; }',
+			esc_html( $overflow_y ),
 			esc_html( $selector_prefix )
 		);
 	}
@@ -2940,7 +3064,8 @@ function et_pb_before_main_editor( $post ) {
 		);
 
 		// add in the visual builder button only on appropriate post types
-		if ( et_builder_fb_enabled_for_post( $post->ID ) && et_pb_is_allowed( 'use_visual_builder' ) && ! et_is_extra_library_layout( $post->ID ) ) {
+		// also, don't add the button on page if it set as static posts page
+		if ( et_builder_fb_enabled_for_post( $post->ID ) && et_pb_is_allowed( 'use_visual_builder' ) && ! et_is_extra_library_layout( $post->ID ) && $post->ID !== get_option( 'page_for_posts' ) ) {
 			$buttons .= sprintf('<a href="%1$s" id="et_pb_fb_cta" class="button button-primary button-large%3$s%4$s">%2$s</a>',
 				esc_url( et_fb_get_vb_url() ),
 				esc_html__( 'Build On The Front End', 'et_builder' ),
@@ -2982,7 +3107,7 @@ function et_pb_before_main_editor( $post ) {
 		<input type="hidden" autocomplete="off" id="_et_pb_ab_stats_refresh_interval" name="et_pb_ab_stats_refresh_interval" value="<?php echo esc_attr( $_et_builder_ab_stats_refresh_interval ); ?>">
 		<input type="hidden" autocomplete="off" id="et_pb_ab_subjects" name="et_pb_ab_subjects" value="<?php echo esc_attr( $_et_builder_ab_subjects ); ?>">
 		<input type="hidden" autocomplete="off" id="et_pb_ab_goal_module" name="et_pb_ab_goal_module" value="<?php echo esc_attr( $_et_builder_ab_goal_module ); ?>">
-		<?php et_builder_fb_enabled_for_post( $post->ID ) ? et_pb_builder_settings_hidden_inputs( $post->ID ) : false; ?>
+		<?php et_pb_builder_settings_hidden_inputs( $post->ID ); ?>
 		<?php et_pb_builder_global_library_inputs( $post->ID ); ?>
 
 		<textarea id="et_pb_old_content" name="et_pb_old_content"><?php echo esc_attr( get_post_meta( $post->ID, '_et_pb_old_content', true ) ); ?></textarea>
@@ -3069,6 +3194,8 @@ function et_pb_admin_scripts_styles( $hook ) {
 
 			wp_enqueue_script( 'wp-color-picker-alpha' );
 			wp_enqueue_style( 'wp-color-picker' );
+
+			wp_enqueue_style( 'et-core-portability', ET_CORE_URL . 'admin/css/portability.css', array(), ET_CORE_VERSION );
 
 			$ver    = ET_BUILDER_VERSION;
 			$root   = ET_BUILDER_URI;
@@ -4112,11 +4239,17 @@ if ( ! function_exists( 'et_builder_ajax_toggle_bfb' ) ) {
 		et_core_security_check( 'manage_options', 'et_builder_toggle_bfb', 'nonce', '_GET' );
 
 		$enable = isset( $_GET['enable'] ) && $_GET['enable'] === '1';
+		$skip_bfb_optin = isset( $_GET['skip_bfb_optin'] ) && $_GET['skip_bfb_optin'] === '1';
 		$welcome = isset( $_GET['welcome'] );
 		$redirect = isset( $_GET['redirect'] ) ? esc_url_raw( $_GET['redirect'] ) : '';
 
 		if ( empty( $redirect ) && isset( $_SERVER['HTTP_REFERER'] ) ) {
 			$redirect = esc_url_raw( $_SERVER['HTTP_REFERER'] );
+		}
+
+		// skip BFB Optin modal if BB activated using link below the Editor.
+		if ( $skip_bfb_optin ) {
+			et_builder_action_bfb_optin_modal_shown();
 		}
 
 		if ( empty( $redirect ) ) {
@@ -4505,12 +4638,24 @@ function et_pb_pagebuilder_meta_box() {
 
 	if ( et_builder_bfb_enabled() ) {
 		$classic_builder_url = add_query_arg( array(
-			'action' => 'et_builder_toggle_bfb',
-			'enable' => '0',
-			'nonce' => wp_create_nonce( 'et_builder_toggle_bfb' ),
+			'action'         => 'et_builder_toggle_bfb',
+			'enable'         => '0',
+			'skip_bfb_optin' => '1',
+			'nonce'          => wp_create_nonce( 'et_builder_toggle_bfb' ),
 		), admin_url( 'admin-ajax.php' ) );
 
-		$bfb_url = et_core_intentionally_unescaped( et_fb_get_bfb_url(), 'fixed_string' );
+		$new_page_url = false;
+		$is_new_page  = false;
+		$edit_page_id = get_the_ID();
+
+		// Polylang creates copy of page and BFB should be loaded on page which is not saved yet and cannot be loaded on FE
+		// Therefore load the homepage and replace the content for BFB to make it load with content from other post
+		if ( 'add' === get_current_screen()->action || $edit_page_id === (int) get_option( 'page_for_posts' ) ) {
+			$new_page_url = get_home_url();
+			$is_new_page = true;
+		}
+
+		$bfb_url = et_core_intentionally_unescaped( et_fb_get_bfb_url( $new_page_url, $is_new_page, $edit_page_id ), 'fixed_string' );
 
 		if ( is_ssl() && 0 === strpos( $bfb_url, 'http://' ) ) {
 			// If Admin is SSL but FE is not, we need to fix BFB url or it won't work
@@ -4527,7 +4672,6 @@ function et_pb_pagebuilder_meta_box() {
 					var iframe = document.body.appendChild(document.createElement('iframe'));
 
 					iframe.id        = 'et-bfb-app-frame';
-					iframe.src       = '{$bfb_url}';
 
 					document.body.classList.add('et-db');
 					document.body.classList.add('et-bfb');
@@ -4540,6 +4684,7 @@ function et_pb_pagebuilder_meta_box() {
 						jQuery('#wpwrap').wrap(outer);
 
 						jQuery('#et-bfb-app-frame').appendTo('#et_pb_layout .et_divi_builder');
+					    iframe.src = '{$bfb_url}';
 
 						// Add first-visible classname to first visible metabox on #normal-sortables
 						jQuery('#et_pb_layout')
@@ -6688,8 +6833,16 @@ function et_pb_get_builder_settings_fields( $options ) {
  * @return void
  */
 function et_pb_builder_settings_hidden_inputs( $post_id ) {
+	if ( ! class_exists( 'ET_Builder_Settings' ) ) {
+		return false;
+	}
+
 	$settings = ET_Builder_Settings::get_fields();
 	$defaults = et_pb_get_builder_settings_configuration_default();
+
+	if ( empty( $settings ) ) {
+		return;
+	}
 
 	if ( empty( $settings ) ) {
 		return;
@@ -8030,28 +8183,39 @@ function et_pb_generate_mobile_settings_tabs() {
 	return $mobile_settings_tabs;
 }
 
-// Generates the css code for responsive options.
-// Uses array of values for each device as input parameter and css_selector with property to apply the css
+/**
+ * Generates the css code for responsive options.
+ *
+ * Uses array of values for each device as input parameter and css_selector with property to
+ * apply the css
+ *
+ * @deprecated See ET_Builder_Module_Helper_ResponsiveOptions::instance()->generate_responsive_css().
+ *
+ * @since 3.23 Deprecated.
+ *
+ * @param  array  $values_array   All device values.
+ * @param  mixed  $css_selector   CSS selector.
+ * @param  string $css_property   CSS property.
+ * @param  string $function_name  Module slug.
+ * @param  string $additional_css Additional CSS.
+ */
 function et_pb_generate_responsive_css( $values_array, $css_selector, $css_property, $function_name, $additional_css = '' ) {
 	if ( ! empty( $values_array ) ) {
 		foreach( $values_array as $device => $current_value ) {
 			if ( '' === $current_value ) {
 				continue;
 			}
-
 			$declaration = '';
-
 			// value can be provided as a string or array in following format - array( 'property_1' => 'value_1', 'property_2' => 'property_2', ... , 'property_n' => 'value_n' )
 			if ( is_array( $current_value ) && ! empty( $current_value ) ) {
 				foreach( $current_value as $this_property => $this_value ) {
 					if ( '' === $this_value ) {
 						continue;
 					}
-
 					$declaration .= sprintf(
 						'%1$s: %2$s%3$s',
 						$this_property,
-						esc_html( et_builder_process_range_value( $this_value ) ),
+						esc_html( et_builder_process_range_value( $this_value, $this_property ) ),
 						'' !== $additional_css ? $additional_css : ';'
 					);
 				}
@@ -8059,27 +8223,23 @@ function et_pb_generate_responsive_css( $values_array, $css_selector, $css_prope
 				$declaration = sprintf(
 					'%1$s: %2$s%3$s',
 					$css_property,
-					esc_html( et_builder_process_range_value( $current_value ) ),
+					esc_html( et_builder_process_range_value( $current_value, $css_property ) ),
 					'' !== $additional_css ? $additional_css : ';'
 				);
 			}
-
 			if ( '' === $declaration ) {
 				continue;
 			}
-
 			$style = array(
 				'selector'    => $css_selector,
 				'declaration' => $declaration,
 			);
-
 			if ( 'desktop_only' === $device ) {
 				$style['media_query'] = ET_Builder_Element::get_media_query( 'min_width_981' );
 			} elseif ( 'desktop' !== $device ) {
 				$current_media_query = 'tablet' === $device ? 'max_width_980' : 'max_width_767';
 				$style['media_query'] = ET_Builder_Element::get_media_query( $current_media_query );
 			}
-
 			ET_Builder_Element::set_style( $function_name, $style );
 		}
 	}
@@ -8438,6 +8598,15 @@ function et_fb_process_imported_content() {
 add_action( 'wp_ajax_et_fb_process_imported_content', 'et_fb_process_imported_content' );
 
 function et_fb_maybe_get_bfb_initial_content( $content, $post_id ) {
+	 if ( isset( $_GET['from_post'] ) && 'empty' !== $_GET['from_post'] ) {
+		$copy_content_from = get_post( $_GET['from_post'] );
+		$existing_content  = $copy_content_from->post_content;
+
+		if ( '' !== $existing_content && has_shortcode( $existing_content, 'et_pb_section' ) ) {
+			return $existing_content;
+		}
+	}
+
 	// process the content only for BFB
 	if ( ! et_builder_bfb_enabled() ) {
 		return $content;
@@ -9515,6 +9684,20 @@ function et_builder_get_shortcuts( $on = 'fb' ) {
 					'fb',
 				),
 			),
+			'increase_padding_module' => array(
+				'kbd'  => array( 'm', array( 'left', 'right', 'up', 'down' ) ),
+				'desc' => esc_html__( 'Increase Module Padding', 'et_builder' ),
+				'on' => array(
+					'fb',
+				),
+			),
+			'decrease_padding_module' => array(
+				'kbd'  => array( 'm', 'alt', array( 'left', 'right', 'up', 'down' ) ),
+				'desc' => esc_html__( 'Decrease Module Padding', 'et_builder' ),
+				'on' => array(
+					'fb',
+				),
+			),
 			'increase_padding_row_10' => array(
 				'kbd'  => array( 'r', 'shift', array( 'left', 'right', 'up', 'down' ) ),
 				'desc' => esc_html__( 'Increase Row Padding By 10px', 'et_builder' ),
@@ -9539,6 +9722,20 @@ function et_builder_get_shortcuts( $on = 'fb' ) {
 			'decrease_padding_section_10' => array(
 				'kbd'  => array( 's', 'alt', 'shift', array( 'left', 'right', 'up', 'down' ) ),
 				'desc' => esc_html__( 'Decrease Section Padding By 10px', 'et_builder' ),
+				'on' => array(
+					'fb',
+				),
+			),
+			'increase_padding_module_10' => array(
+				'kbd'  => array( 'm', 'shift', array( 'left', 'right', 'up', 'down' ) ),
+				'desc' => esc_html__( 'Increase Module Padding By 10px', 'et_builder' ),
+				'on' => array(
+					'fb',
+				),
+			),
+			'decrease_padding_module_10' => array(
+				'kbd'  => array( 'm', 'alt', 'shift', array( 'left', 'right', 'up', 'down' ) ),
+				'desc' => esc_html__( 'Decrease Module Padding By 10px', 'et_builder' ),
 				'on' => array(
 					'fb',
 				),
@@ -9887,3 +10084,36 @@ function et_builder_is_hover_enabled( $setting, $props ) {
 	return et_pb_hover_options()->is_enabled( $setting, $props );
 }
 endif;
+
+if ( ! function_exists( 'et_builder_add_prefix' ) ) {
+	/**
+	 * Prefixes a string key with a prefix string using the provided delimiter
+	 * In case the prefix is empty, original key is returned
+	 *
+	 * @param string $prefix
+	 * @param string $key
+	 * @param string $delimiter
+	 *
+	 * @return string
+	 */
+	function et_builder_add_prefix( $prefix, $key, $delimiter = '_' ) {
+		return $prefix === '' ? $key : $prefix . $delimiter . $key;
+    }
+}
+
+if ( ! function_exists( 'et_builder_module_prop' ) ) {
+	/**
+	 * Returns props value by provided key, if the value is empty, returns the default value
+	 *
+	 * @param string $prop
+	 * @param array $props
+	 * @param mixed $default
+	 *
+	 * @return mixed|null
+	 */
+	function et_builder_module_prop( $prop, $props, $default ) {
+		$value = et_()->array_get( $props, $prop );
+
+		return null === $value || '' === $value ? $default : $value;
+    }
+}

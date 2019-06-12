@@ -338,6 +338,10 @@ class ET_Core_PageResource {
 				@self::$wpfs->delete( $temp_directory, true );
 			}
 		}
+
+		// Reset $_resources property; Mostly useful for unit test big request which needs to make
+		// each test*() method act like it is different page request
+		self::$_resources = null;
 	}
 
 	protected static function _assign_output_location( $location, $resource ) {

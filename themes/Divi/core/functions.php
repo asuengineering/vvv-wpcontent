@@ -536,6 +536,43 @@ endif;
 // common.js needs to be loaded after waypoint, fitvid, & magnific js to avoid broken javascript on Facebook in-app browser, hence the 15 priority
 add_action( 'wp_enqueue_scripts', 'et_core_register_common_assets', 15 );
 
+if ( ! function_exists( 'et_core_noconflict_styles_gform' ) ) :
+/**
+ * Register Core styles with Gravity Forms so that they're enqueued when running on no-conflict mode
+ *
+ * @since 3.21.2
+ *
+ * @param $styles
+ *
+ * @return array
+ */
+function et_core_noconflict_styles_gform( $styles ) {
+	$styles[] = 'et-core-admin';
+
+	return $styles;
+}
+endif;
+add_filter( 'gform_noconflict_styles', 'et_core_noconflict_scripts_gform' );
+
+if ( ! function_exists( 'et_core_noconflict_scripts_gform' ) ) :
+/**
+ * Register Core scripts with Gravity Forms so that they're enqueued when running on no-conflict mode
+ *
+ * @since 3.21.2
+ *
+ * @param $scripts
+ *
+ * @return array
+ */
+function et_core_noconflict_scripts_gform( $scripts ) {
+	$scripts[] = 'et-core-admin';
+	$scripts[] = 'et-core-common';
+
+	return $scripts;
+}
+endif;
+add_filter( 'gform_noconflict_scripts', 'et_core_noconflict_scripts_gform' );
+
 if ( ! function_exists( 'et_core_security_check' ) ):
 /**
  * Check if current user can perform an action and/or verify a nonce value. die() if not authorized.
@@ -701,6 +738,7 @@ function et_get_allowed_localization_html_elements() {
 		'span'   => array(),
 		'div'    => array(),
 		'strong' => array(),
+		'code'   => array(),
 	);
 
 	$elements = apply_filters( 'et_allowed_localization_html_elements', $elements );
